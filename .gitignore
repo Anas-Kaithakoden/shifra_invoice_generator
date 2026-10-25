@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.wrangler/
+.env
+.env.*
+*.tsbuildinfo
+scripts/.tmp-*
+scripts/.e2e-*
+__pycache__/
+*.py[cod]
+.DS_Store
+Thumbs.db
+Shifra_Nuha_Proforma_Invoice_Template.docx
