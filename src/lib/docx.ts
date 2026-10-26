@@ -1,16 +1,21 @@
 import Docxtemplater from 'docxtemplater';
 import PizZip from 'pizzip';
-import type { InvoiceDocxData } from './invoice';
+import {
+  DOCUMENT_TYPES,
+  type DocumentType,
+  type InvoiceDocxData,
+} from './invoice';
 
 export const DOCX_MIME =
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
-let templatePromise: Promise<ArrayBuffer> | null = null;
+const templatePromises = new Map<DocumentType, Promise<ArrayBuffer>>();
 
-export function loadInvoiceTemplate(): Promise<ArrayBuffer> {
+export function loadInvoiceTemplate(documentType: DocumentType): Promise<ArrayBuffer> {
+  let templatePromise = templatePromises.get(documentType);
   if (!templatePromise) {
     templatePromise = fetch(
-      `${import.meta.env.BASE_URL}templates/shifra-invoice-template.docx`,
+      `${import.meta.env.BASE_URL}${DOCUMENT_TYPES[documentType].templatePath}`,
       { cache: 'force-cache' },
     ).then((response) => {
       if (!response.ok) {
@@ -18,8 +23,9 @@ export function loadInvoiceTemplate(): Promise<ArrayBuffer> {
       }
       return response.arrayBuffer();
     });
+    templatePromises.set(documentType, templatePromise);
     templatePromise.catch(() => {
-      templatePromise = null;
+      templatePromises.delete(documentType);
     });
   }
   return templatePromise;

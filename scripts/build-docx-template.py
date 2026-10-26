@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Build the dynamic Word template used by the invoice generator.
+"""Build the dynamic Word templates used by the invoice generator.
 
-The original Shifra Nuha proforma invoice is kept untouched in
-templates/source/. This script makes one copy, replaces only the sample
+The original Shifra Nuha proforma invoice and invoice are kept untouched in
+templates/source/. This script makes tagged copies, replaces only the sample
 values with docxtemplater tags, removes the sample item rows (the first row
 becomes the repeating row), and keeps every other piece of Word formatting
 intact. Run with: npm run template
@@ -14,11 +14,45 @@ import re
 import shutil
 import sys
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCE = ROOT / "templates" / "source" / "Shifra_Nuha_Proforma_Invoice_Template.docx"
-OUTPUT = ROOT / "public" / "templates" / "shifra-invoice-template.docx"
+SOURCE_DIR = ROOT / "templates" / "source"
+OUTPUT_DIR = ROOT / "public" / "templates"
+
+
+@dataclass(frozen=True)
+class TemplateConfig:
+    key: str
+    source: Path
+    output: Path
+    number_prefix: str
+    labels: tuple[str, str, str]
+    sample_advance: str
+    sample_balance: str
+
+
+TEMPLATES = (
+    TemplateConfig(
+        key="proforma",
+        source=SOURCE_DIR / "Shifra_Nuha_Proforma_Invoice_Template.docx",
+        output=OUTPUT_DIR / "shifra-proforma-template.docx",
+        number_prefix="SNT-PI-",
+        labels=("Estimated Total", "Amount Payable in Advance", "Balance"),
+        sample_advance="19,200",
+        sample_balance="19,200",
+    ),
+    TemplateConfig(
+        key="invoice",
+        source=SOURCE_DIR / "Shifra_Nuha_Invoice_Template.docx",
+        output=OUTPUT_DIR / "shifra-invoice-template.docx",
+        number_prefix="SNT-INV-",
+        labels=("Total Amount", "Amount Received", "Balance Due"),
+        sample_advance="[PAID]",
+        sample_balance="[BALANCE]",
+    ),
+)
 
 
 def replace_once(text: str, old: str, new: str, label: str) -> str:
@@ -143,11 +177,11 @@ def wrap_summary_and_bank(block: str) -> str:
     )
 
 
-def build() -> None:
-    if not SOURCE.exists():
-        raise FileNotFoundError(f"Original Word template not found: {SOURCE}")
+def build_template(config: TemplateConfig) -> None:
+    if not config.source.exists():
+        raise FileNotFoundError(f"Original Word template not found: {config.source}")
 
-    with zipfile.ZipFile(SOURCE) as source_zip:
+    with zipfile.ZipFile(config.source) as source_zip:
         parts = {name: source_zip.read(name) for name in source_zip.namelist()}
 
     document = parts["word/document.xml"].decode("utf-8")
@@ -173,10 +207,10 @@ def build() -> None:
     )
     document = replace_paragraph_after(document, "<w:t>SERVICE</w:t>", "{serviceName}")
 
-    # ---- Proforma number: three runs become one tagged run ---------------
+    # ---- Document number: three runs become one tagged run ---------------
     old_number = (
         '<w:r><w:rPr><w:b/><w:bCs/><w:sz w:val="17"/><w:szCs w:val="17"/></w:rPr>'
-        "<w:t>SNT-PI-</w:t></w:r>"
+        f"<w:t>{config.number_prefix}</w:t></w:r>"
         '<w:r w:rsidR="00E36E5B"><w:rPr><w:b/><w:bCs/><w:sz w:val="17"/><w:szCs w:val="17"/></w:rPr>'
         "<w:t>2026-</w:t></w:r>"
         '<w:r w:rsidR="00FD0A78"><w:rPr><w:b/><w:bCs/><w:sz w:val="17"/><w:szCs w:val="17"/></w:rPr>'
@@ -184,9 +218,9 @@ def build() -> None:
     )
     new_number = (
         '<w:r><w:rPr><w:b/><w:bCs/><w:sz w:val="17"/><w:szCs w:val="17"/></w:rPr>'
-        '<w:t xml:space="preserve">{proformaNumber}</w:t></w:r>'
+        '<w:t xml:space="preserve">{documentNumber}</w:t></w:r>'
     )
-    document = replace_once(document, old_number, new_number, "proforma number")
+    document = replace_once(document, old_number, new_number, "document number")
 
     # ---- Date: clean the centred/leading-space hack, tag the date -------
     date_start = document.find('w14:paraId="4ED4033C"')
@@ -239,34 +273,43 @@ def build() -> None:
     document = document[:table_start] + new_table + document[table_end:]
 
     # ---- Payment summary labels and values ------------------------------
+    total_label, advance_label, balance_label = config.labels
     document = replace_once(
         document,
-        "<w:t>Estimated Total</w:t>",
+        f"<w:t>{total_label}</w:t>",
         '<w:t xml:space="preserve">{totalLabel}</w:t>',
-        "estimated total label",
+        f"{config.key} total label",
     )
     document = replace_once(
         document,
-        "<w:t>Amount Payable in Advance</w:t>",
+        f"<w:t>{advance_label}</w:t>",
         '<w:t xml:space="preserve">{advanceLabel}</w:t>',
-        "advance label",
+        f"{config.key} advance label",
     )
     document = replace_once(
         document,
-        "<w:t>Balance</w:t>",
+        f"<w:t>{balance_label}</w:t>",
         '<w:t xml:space="preserve">{balanceLabel}</w:t>',
-        "balance label",
+        f"{config.key} balance label",
     )
-    document = replace_once(document, "₹[TOTAL]", "{total}", "estimated total value")
+    document = replace_once(document, "₹[TOTAL]", "{total}", f"{config.key} total value")
 
     summary_start, summary_end = table_span(document, "{totalLabel}")
     summary = document[summary_start:summary_end]
     summary = summary.replace("<w:t>₹</w:t>", "<w:t>{advance}</w:t>", 1)
-    summary = summary.replace("<w:t>19,200</w:t>", "<w:t></w:t>", 1)
+    summary = summary.replace(
+        f"<w:t>{config.sample_advance}</w:t>", "<w:t></w:t>", 1
+    )
     summary = summary.replace("<w:t>₹</w:t>", "<w:t>{balance}</w:t>", 1)
-    summary = summary.replace("<w:t>19,200</w:t>", "<w:t></w:t>", 1)
-    if "19,200" in summary or "<w:t>₹</w:t>" in summary:
-        raise RuntimeError("Could not replace all sample summary values")
+    summary = summary.replace(
+        f"<w:t>{config.sample_balance}</w:t>", "<w:t></w:t>", 1
+    )
+    if (
+        config.sample_advance in summary
+        or config.sample_balance in summary
+        or "<w:t>₹</w:t>" in summary
+    ):
+        raise RuntimeError(f"Could not replace all {config.key} summary values")
     summary = add_keep_next(summary)
     document = document[:summary_start] + summary + document[summary_end:]
 
@@ -294,25 +337,28 @@ def build() -> None:
     if bank_start < summary_end:
         raise RuntimeError("Bank details must follow the payment summary")
     summary_and_bank = wrap_summary_and_bank(document[summary_start:bank_end])
-    document = (
-        document[:summary_start] + summary_and_bank + document[bank_end:]
-    )
+    document = document[:summary_start] + summary_and_bank + document[bank_end:]
 
     # ---- Write the new docx, preserving every other package part --------
     parts["word/document.xml"] = document.encode("utf-8")
-    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    temp_output = OUTPUT.with_suffix(".tmp.docx")
+    config.output.parent.mkdir(parents=True, exist_ok=True)
+    temp_output = config.output.with_suffix(".tmp.docx")
     with zipfile.ZipFile(temp_output, "w", zipfile.ZIP_DEFLATED) as out_zip:
         for name, data in parts.items():
             out_zip.writestr(name, data)
-    shutil.move(temp_output, OUTPUT)
+    shutil.move(temp_output, config.output)
 
     # Also publish the original logo extracted from the Word package.
     logo_output = ROOT / "public" / "shifra-logo.png"
     logo_output.write_bytes(parts["word/media/image1.png"])
 
-    print(f"Built template: {OUTPUT}")
-    print(f"Extracted logo: {logo_output}")
+    print(f"Built {config.key} template: {config.output}")
+
+
+def build() -> None:
+    for config in TEMPLATES:
+        build_template(config)
+    print(f"Extracted logo: {ROOT / 'public' / 'shifra-logo.png'}")
 
 
 if __name__ == "__main__":

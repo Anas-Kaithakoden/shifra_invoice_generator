@@ -1,4 +1,11 @@
-import type { InvoiceCalculation, InvoiceForm, LineItem, ValidationResult } from '../lib/invoice';
+import {
+  DOCUMENT_TYPES,
+  type DocumentType,
+  type InvoiceCalculation,
+  type InvoiceForm,
+  type LineItem,
+  type ValidationResult,
+} from '../lib/invoice';
 import { LineItemsEditor } from './LineItemsEditor';
 import { PaymentSummaryEditor } from './PaymentSummaryEditor';
 import {
@@ -11,11 +18,20 @@ import {
   TextArea,
   TextInput,
   WordIcon,
+  cx,
 } from './ui';
+
+const DOCUMENT_TYPE_ORDER: DocumentType[] = ['proforma', 'invoice'];
+
+const DOCUMENT_TYPE_DESCRIPTIONS: Record<DocumentType, string> = {
+  proforma: 'An estimate or request for advance before the work is completed.',
+  invoice: 'A final bill for completed work and payment received.',
+};
 
 export function EditorPanel({
   form,
   updateField,
+  onChangeDocumentType,
   calculation,
   validation,
   showValidation,
@@ -33,6 +49,7 @@ export function EditorPanel({
 }: {
   form: InvoiceForm;
   updateField: <K extends keyof InvoiceForm>(key: K, value: InvoiceForm[K]) => void;
+  onChangeDocumentType: (documentType: DocumentType) => void;
   calculation: InvoiceCalculation;
   validation: ValidationResult;
   showValidation: boolean;
@@ -51,11 +68,55 @@ export function EditorPanel({
   const showError = (key: string) => (showValidation ? validation.errors[key] : undefined);
   const errorCount =
     Object.keys(validation.errors).length + Object.keys(validation.itemErrors).length;
+  const documentConfig = DOCUMENT_TYPES[form.documentType];
 
   return (
     <div className="space-y-4">
       <Section
-        eyebrow="01 · Client details"
+        eyebrow="01 · Document type"
+        title="What are you creating?"
+        description="Choose the document first. The preview, print layout and Word download all use the matching Shifra Nuha template."
+      >
+        <div
+          role="radiogroup"
+          aria-label="Document type"
+          className="grid gap-2 sm:grid-cols-2"
+        >
+          {DOCUMENT_TYPE_ORDER.map((documentType) => {
+            const option = DOCUMENT_TYPES[documentType];
+            const selected = form.documentType === documentType;
+            return (
+              <label
+                key={documentType}
+                className={cx(
+                  'flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors',
+                  selected
+                    ? 'border-cyan bg-cyan/5'
+                    : 'border-line bg-white hover:bg-canvas',
+                )}
+              >
+                <input
+                  type="radio"
+                  name="document-type"
+                  value={documentType}
+                  checked={selected}
+                  onChange={() => onChangeDocumentType(documentType)}
+                  className="mt-1 h-4 w-4 shrink-0 cursor-pointer accent-cyan"
+                />
+                <span>
+                  <span className="block text-sm font-bold text-ink">{option.label}</span>
+                  <span className="mt-0.5 block text-[11px] leading-relaxed text-muted">
+                    {DOCUMENT_TYPE_DESCRIPTIONS[documentType]}
+                  </span>
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      </Section>
+
+      <Section
+        eyebrow="02 · Client details"
         title="Bill to"
         description="Phone and email are optional. The address can span multiple lines."
       >
@@ -123,9 +184,9 @@ export function EditorPanel({
       </Section>
 
       <Section
-        eyebrow="02 · Invoice details"
-        title="Service and proforma reference"
-        description="The service title appears in the template's SERVICE area. The date is printed as DD/MM/YYYY."
+        eyebrow="03 · Invoice details"
+        title="Service and document reference"
+        description="The service title appears in the template's SERVICE area. The number and date appear in the header; the date is printed as DD/MM/YYYY."
       >
         <div className="grid gap-4">
           <Field
@@ -146,19 +207,19 @@ export function EditorPanel({
 
           <div className="grid gap-4 sm:grid-cols-2">
             <Field
-              label="Proforma Invoice Number"
-              htmlFor="proforma-number"
-              error={showError('proformaNumber')}
+              label={documentConfig.formNumberLabel}
+              htmlFor="document-number"
+              error={showError('documentNumber')}
               hint="Enter this manually; no numbering scheme is applied."
             >
               <TextInput
-                id="proforma-number"
-                value={form.proformaNumber}
-                onChange={(event) => updateField('proformaNumber', event.target.value)}
-                placeholder="e.g. SNT-PI-2026-101"
+                id="document-number"
+                value={form.documentNumber}
+                onChange={(event) => updateField('documentNumber', event.target.value)}
+                placeholder={documentConfig.numberPlaceholder}
                 maxLength={80}
                 autoComplete="off"
-                aria-invalid={Boolean(showError('proformaNumber')) || undefined}
+                aria-invalid={Boolean(showError('documentNumber')) || undefined}
               />
             </Field>
             <Field

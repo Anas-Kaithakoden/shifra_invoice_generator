@@ -1,5 +1,8 @@
-import type { InvoiceCalculation, InvoiceForm } from '../lib/invoice';
-import { DEFAULT_LABELS } from '../lib/invoice';
+import {
+  DOCUMENT_TYPES,
+  type InvoiceCalculation,
+  type InvoiceForm,
+} from '../lib/invoice';
 import { formatINR } from '../lib/money';
 import { Alert, Button, Field, MoneyInput, Section, TextInput, cx } from './ui';
 
@@ -17,18 +20,19 @@ export function PaymentSummaryEditor({
   errors: Record<string, string>;
 }) {
   const showError = (key: string) => (showValidation ? errors[key] : undefined);
+  const config = DOCUMENT_TYPES[form.documentType];
 
   return (
     <Section
-      eyebrow="04 · Payment summary"
-      title="Estimated total, advance and balance"
-      description="The estimated total comes from the included line items. Enter the advance manually; the balance is calculated as estimated total minus advance."
+      eyebrow="05 · Payment summary"
+      title={config.summaryTitle}
+      description={config.summaryDescription}
     >
       <div className="overflow-hidden rounded-md border border-line">
         <div className="grid gap-3 border-b border-line bg-mist/70 p-3.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
           <div>
             <p className="text-sm font-bold text-ink">
-              {form.totalLabel.trim() || DEFAULT_LABELS.total}
+              {form.totalLabel.trim() || config.labels.total}
             </p>
             <p className="mt-0.5 text-[11px] text-muted">
               {calculation.totalOverrideActive
@@ -61,7 +65,7 @@ export function PaymentSummaryEditor({
             />
             <span>
               <span className="block text-xs font-bold text-ink">
-                Override the estimated total manually
+                {config.totalOverrideLabel}
               </span>
               <span className="mt-0.5 block text-[11px] leading-relaxed text-muted">
                 Use this only when the invoice total differs from the sum of the rows.
@@ -72,7 +76,7 @@ export function PaymentSummaryEditor({
           {form.overrideTotal ? (
             <div className="grid gap-2 rounded-md border border-line bg-canvas/60 p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
               <Field
-                label="Manual estimated total"
+                label={config.manualTotalLabel}
                 htmlFor="total-override"
                 error={showError('totalOverride')}
                 className="max-w-xs"
@@ -98,10 +102,10 @@ export function PaymentSummaryEditor({
           ) : null}
 
           <Field
-            label={form.advanceLabel.trim() || DEFAULT_LABELS.advance}
+            label={form.advanceLabel.trim() || config.labels.advance}
             htmlFor="advance"
             error={showError('advance')}
-            hint="Leave blank if no advance has been paid."
+            hint={config.advanceHint}
             className="max-w-xs"
           >
             <MoneyInput
@@ -116,11 +120,11 @@ export function PaymentSummaryEditor({
           <div className="flex items-center justify-between gap-3 border-t border-line pt-3">
             <div>
               <p className="text-xs font-bold text-ink">
-                {form.balanceLabel.trim() || DEFAULT_LABELS.balance}
+                {form.balanceLabel.trim() || config.labels.balance}
               </p>
               <p className="mt-0.5 text-[11px] text-muted">
-                {form.totalLabel.trim() || DEFAULT_LABELS.total} minus{' '}
-                {form.advanceLabel.trim() || DEFAULT_LABELS.advance}
+                {form.totalLabel.trim() || config.labels.total} minus{' '}
+                {form.advanceLabel.trim() || config.labels.advance}
               </p>
             </div>
             <p
@@ -140,18 +144,13 @@ export function PaymentSummaryEditor({
 
       {calculation.advanceExceedsTotal ? (
         <div className="mt-3">
-          <Alert tone="warning">
-            The advance is higher than the estimated total, so the balance is negative. Review
-            the payment figures before sending the invoice.
-          </Alert>
+          <Alert tone="warning">{config.advanceExceedsMessage}</Alert>
         </div>
       ) : null}
 
       {calculation.effectiveTotalPaise === null ? (
         <div className="mt-3">
-          <Alert tone="warning">
-            The estimated total cannot be calculated until every included line amount is valid.
-          </Alert>
+          <Alert tone="warning">{config.totalInvalidMessage}</Alert>
         </div>
       ) : null}
 
@@ -173,7 +172,7 @@ export function PaymentSummaryEditor({
             />
           </Field>
           <Field
-            label="Advance label"
+            label={config.advanceLabelField}
             htmlFor="advance-label"
             error={showError('advanceLabel')}
           >

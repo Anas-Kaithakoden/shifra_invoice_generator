@@ -53,9 +53,9 @@ export function LineItemsEditor({
 
   return (
     <Section
-      eyebrow="03 · Line items"
+      eyebrow="04 · Line items"
       title="Description, quantity and amount"
-      description="Add as many rows as needed. The estimated total adds each included row's amount; quantity is printed for reference but does not multiply the amount."
+      description="Add as many rows as needed. The invoice total adds each included row's amount; quantity is printed for reference but does not multiply the amount."
       action={
         <Button type="button" variant="cyan" size="sm" onClick={onAddItem}>
           <PlusIcon />

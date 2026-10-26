@@ -1,5 +1,9 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { DEFAULT_LABELS, type InvoiceCalculation, type InvoiceForm } from '../lib/invoice';
+import {
+  DOCUMENT_TYPES,
+  type InvoiceCalculation,
+  type InvoiceForm,
+} from '../lib/invoice';
 import { formatINR, formatINRWithoutSymbol } from '../lib/money';
 import { formatDateDDMMYYYY } from '../lib/date';
 
@@ -15,13 +19,14 @@ export function InvoiceDocument({
   form: InvoiceForm;
   calculation: InvoiceCalculation;
 }) {
+  const config = DOCUMENT_TYPES[form.documentType];
   const contact = [form.clientPhone.trim(), form.clientEmail.trim()]
     .filter(Boolean)
     .join('  |  ');
   const visibleItems = calculation.includedItems;
-  const totalLabel = form.totalLabel.trim() || DEFAULT_LABELS.total;
-  const advanceLabel = form.advanceLabel.trim() || DEFAULT_LABELS.advance;
-  const balanceLabel = form.balanceLabel.trim() || DEFAULT_LABELS.balance;
+  const totalLabel = form.totalLabel.trim() || config.labels.total;
+  const advanceLabel = form.advanceLabel.trim() || config.labels.advance;
+  const balanceLabel = form.balanceLabel.trim() || config.labels.balance;
   const total = calculation.effectiveTotalPaise;
   const advance = calculation.advancePaise;
   const balance = calculation.balancePaise;
@@ -44,10 +49,10 @@ export function InvoiceDocument({
             <div className="inv-company-line">+91 9447979616 | info@shifranuhatech.com</div>
           </div>
           <div className="inv-title-block">
-            <div className="inv-doc-title">PROFORMA INVOICE</div>
+            <div className="inv-doc-title">{config.previewTitle}</div>
             <div className="inv-meta">
-              <span className="inv-meta-label">Proforma No:&nbsp; </span>
-              {placeholder(form.proformaNumber.trim(), '—', 'inv-meta-value')}
+              <span className="inv-meta-label">{config.numberLabel}&nbsp; </span>
+              {placeholder(form.documentNumber.trim(), '—', 'inv-meta-value')}
             </div>
             <div className="inv-meta inv-meta-date">
               <span className="inv-meta-label">Date:&nbsp; </span>
@@ -176,7 +181,7 @@ export function InvoiceDocument({
       </div>
 
       <footer className="inv-footer">
-        <div>This is a proforma invoice, not a tax invoice or proof of payment.</div>
+        <div>{config.footer}</div>
         <div>Thank you for choosing Shifra Nuha Technologies.</div>
       </footer>
     </div>

@@ -83,9 +83,9 @@ async function readPdf(path) {
   return pages;
 }
 
-function footerBaseline(page) {
+function footerBaseline(page, text = 'This is a proforma invoice') {
   const lines = page.items.filter((item) => item.text.trim().length > 0);
-  const footer = lines.find((item) => item.text.includes('This is a proforma invoice'));
+  const footer = lines.find((item) => item.text.includes(text));
   assert.ok(footer, `Footer was not found on PDF page ${page.number}`);
   return footer.y;
 }
@@ -149,6 +149,8 @@ try {
     await page.getByTestId('summary-total').textContent(),
     '₹19,200.00',
   );
+  assert.equal(await page.getByRole('radio', { name: /^Proforma invoice/ }).isChecked(), true);
+  assert.equal(await page.getByRole('radio', { name: /^Invoice/ }).isChecked(), false);
   assert.equal(await page.getByLabel('Client / Business Name').inputValue(), '');
   assert.equal(await page.getByLabel('Proforma Invoice Number').inputValue(), '');
   assert.match(await page.getByLabel('Invoice Date').inputValue(), /^\d{4}-\d{2}-\d{2}$/);
@@ -347,6 +349,76 @@ try {
   const onePageFooterY = footerBaseline(firstPage);
   assert.ok(onePageFooterY > 20 && onePageFooterY < 60, `footer y=${onePageFooterY}`);
 
+  // Switching to a standard invoice loads the matching template, labels and footer.
+  await page.emulateMedia({ media: 'screen' });
+  await page.getByRole('radio', { name: /^Invoice/ }).check();
+  await waitForPreviewText(page, 'Invoice No:');
+  const invoicePreview = await previewText(page);
+  assert.ok(invoicePreview.includes('INVOICE'));
+  assert.ok(invoicePreview.includes('Invoice No:'));
+  assert.ok(invoicePreview.includes('Please quote the invoice number when making payment.'));
+  assert.ok(!invoicePreview.includes('PROFORMA INVOICE'));
+  assert.ok(!invoicePreview.includes('Proforma No:'));
+  assert.ok(!invoicePreview.includes('This is a proforma invoice'));
+  assert.deepEqual(
+    await page.locator('.preview-scale-source .inv-summary th').allTextContents(),
+    ['Total Amount', 'Amount Received', 'Balance Due'],
+  );
+  assert.equal(await page.getByLabel('Invoice Number').inputValue(), 'SNT-PI-2026-101');
+  await page.getByLabel('Invoice Number').fill('SNT-INV-2026-101');
+  await page.getByLabel('Amount Received').fill('5000');
+  await waitForPreviewText(page, 'SNT-INV-2026-101');
+  assert.equal(await page.getByTestId('summary-balance').textContent(), '₹14,200.00');
+
+  const invoiceDownloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download Word' }).click();
+  const invoiceDownload = await invoiceDownloadPromise;
+  await page
+    .getByText(/Word document downloaded as Invoice_SNT-INV-2026-101\.docx/)
+    .waitFor();
+  assert.equal(invoiceDownload.suggestedFilename(), 'Invoice_SNT-INV-2026-101.docx');
+  const invoiceDocxPath = join(outputDir, invoiceDownload.suggestedFilename());
+  await invoiceDownload.saveAs(invoiceDocxPath);
+  const invoiceZip = new PizZip(readFileSync(invoiceDocxPath));
+  const invoiceDocumentXml = invoiceZip.file('word/document.xml').asText();
+  const invoiceFooterXml = invoiceZip.file('word/footer1.xml').asText();
+  assert.ok(invoiceDocumentXml.includes('INVOICE'));
+  assert.ok(invoiceDocumentXml.includes('Invoice No:'));
+  assert.ok(invoiceDocumentXml.includes('SNT-INV-2026-101'));
+  assert.ok(invoiceDocumentXml.includes('Total Amount'));
+  assert.ok(invoiceDocumentXml.includes('Amount Received'));
+  assert.ok(invoiceDocumentXml.includes('Balance Due'));
+  assert.ok(!invoiceDocumentXml.includes('PROFORMA INVOICE'));
+  assert.ok(invoiceFooterXml.includes('Please quote the invoice number when making payment.'));
+  assert.ok(!invoiceFooterXml.includes('This is a proforma invoice'));
+
+  await page.getByRole('button', { name: 'Print / Save as PDF' }).click();
+  await page.getByText(/Print dialog opened/).waitFor();
+  assert.match(await page.title(), /Invoice_SNT-INV-2026-101/);
+  const invoicePdfPath = join(outputDir, 'invoice-standard.pdf');
+  await page.emulateMedia({ media: 'print' });
+  await page.pdf({ path: invoicePdfPath, preferCSSPageSize: true, printBackground: true });
+  const invoicePdfPages = await readPdf(invoicePdfPath);
+  assert.equal(invoicePdfPages.length, 1, 'six-item invoice should print on one page');
+  const invoicePage = invoicePdfPages[0];
+  assert.ok(invoicePage.text.includes('Please quote the invoice number when making payment.'));
+  assert.ok(invoicePage.text.includes('Total Amount'));
+  assert.ok(invoicePage.text.includes('Amount Received'));
+  assert.ok(invoicePage.text.includes('Balance Due'));
+  assert.ok(!invoicePage.text.includes('This is a proforma invoice'));
+  const invoiceFooterY = footerBaseline(invoicePage, 'Please quote the invoice number');
+  assert.ok(invoiceFooterY > 20 && invoiceFooterY < 60, `invoice footer y=${invoiceFooterY}`);
+
+  // Switch back before the multi-page proforma check.
+  await page.emulateMedia({ media: 'screen' });
+  await page.getByRole('radio', { name: /^Proforma invoice/ }).check();
+  await waitForPreviewText(page, 'PROFORMA INVOICE');
+  assert.deepEqual(
+    await page.locator('.preview-scale-source .inv-summary th').allTextContents(),
+    ['Estimated Total', 'Amount Payable in Advance', 'Balance'],
+  );
+  await page.getByLabel('Amount Payable in Advance').fill('5000');
+
   // Many rows must paginate, repeat the table header and keep the footer on every page.
   await page.emulateMedia({ media: 'screen' });
   await page.getByRole('button', { name: 'Edit invoice' }).click().catch(() => {});
@@ -438,6 +510,8 @@ try {
         onePagePdf: onePagePdfPath,
         multiPagePdf: multiPagePdfPath,
         multiPageCount: pdfPages.length,
+        invoiceWordFile: invoiceDocxPath,
+        invoicePdf: invoicePdfPath,
         outputDir,
       },
       null,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_LABELS,
+  DOCUMENT_TYPES,
   buildDocxData,
   calculateInvoice,
   createInitialForm,
@@ -17,7 +17,7 @@ function requiredForm(overrides: Partial<InvoiceForm> = {}): InvoiceForm {
     clientName: 'Acme Trading',
     clientAddress: '12 Market Road\nKochi, Kerala 682001',
     serviceName: 'Private Limited Company Registration',
-    proformaNumber: 'SNT-PI-2026-101',
+    documentNumber: 'SNT-PI-2026-101',
     ...overrides,
   };
 }
@@ -29,19 +29,28 @@ function itemsFrom(rows: Array<[string, string, string, boolean?]>) {
 }
 
 describe('initial form and sample data', () => {
-  it('starts with blank client and invoice fields, today and six sample rows', () => {
+  it('starts as a proforma with blank fields, today and six sample rows', () => {
     const form = createInitialForm();
+    expect(form.documentType).toBe('proforma');
     expect(form.clientName).toBe('');
     expect(form.clientAddress).toBe('');
     expect(form.clientPhone).toBe('');
     expect(form.clientEmail).toBe('');
     expect(form.serviceName).toBe('');
-    expect(form.proformaNumber).toBe('');
+    expect(form.documentNumber).toBe('');
     expect(form.invoiceDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(form.items).toHaveLength(6);
     expect(form.advance).toBe('');
     expect(form.overrideTotal).toBe(false);
-    expect(form.totalLabel).toBe(DEFAULT_LABELS.total);
+    expect(form.totalLabel).toBe(DOCUMENT_TYPES.proforma.labels.total);
+  });
+
+  it('uses invoice-specific default labels when requested', () => {
+    const form = createInitialForm('invoice');
+    expect(form.documentType).toBe('invoice');
+    expect(form.totalLabel).toBe(DOCUMENT_TYPES.invoice.labels.total);
+    expect(form.advanceLabel).toBe(DOCUMENT_TYPES.invoice.labels.advance);
+    expect(form.balanceLabel).toBe(DOCUMENT_TYPES.invoice.labels.balance);
   });
 
   it('creates unique row ids and independent sample arrays', () => {
@@ -150,14 +159,22 @@ describe('calculateInvoice', () => {
 });
 
 describe('validateInvoice', () => {
-  it('requires the client, service and proforma reference', () => {
+  it('requires the client, service and document reference', () => {
     const result = validateInvoice(createInitialForm());
     expect(result.success).toBe(false);
     expect(result.errors.clientName).toBeDefined();
     expect(result.errors.clientAddress).toBeDefined();
     expect(result.errors.serviceName).toBeDefined();
-    expect(result.errors.proformaNumber).toBeDefined();
+    expect(result.errors.documentNumber).toBeDefined();
     expect(result.errors.invoiceDate).toBeUndefined();
+  });
+
+  it('uses document-specific validation messages for the number', () => {
+    const proforma = validateInvoice(createInitialForm('proforma'));
+    expect(proforma.errors.documentNumber).toBe('Proforma invoice number is required.');
+
+    const invoice = validateInvoice(createInitialForm('invoice'));
+    expect(invoice.errors.documentNumber).toBe('Invoice number is required.');
   });
 
   it('accepts a complete valid form', () => {
@@ -221,6 +238,7 @@ describe('buildDocxData', () => {
 
     expect(data.clientName).toBe('Acme Trading');
     expect(data.clientContact).toBe('+91 98765 43210  |  client@example.com');
+    expect(data.documentNumber).toBe('SNT-PI-2026-101');
     expect(data.invoiceDate).toBe(formatDate(form.invoiceDate));
     expect(data.total).toBe('₹19,200.00');
     expect(data.advance).toBe('₹5,000.00');
@@ -240,16 +258,26 @@ function formatDate(iso: string): string {
 }
 
 describe('makeInvoiceFilename', () => {
-  it('sanitizes the proforma number and keeps a .docx extension', () => {
-    expect(makeInvoiceFilename('SNT-PI-2026-101')).toBe(
+  it('sanitizes the document number and keeps a .docx extension', () => {
+    expect(makeInvoiceFilename('proforma', 'SNT-PI-2026-101')).toBe(
       'Proforma_Invoice_SNT-PI-2026-101.docx',
     );
-    expect(makeInvoiceFilename('  SNT PI 101  ')).toBe('Proforma_Invoice_SNT_PI_101.docx');
-    expect(makeInvoiceFilename('A/B:C*D?')).toBe('Proforma_Invoice_A-B-C-D-.docx');
+    expect(makeInvoiceFilename('proforma', '  SNT PI 101  ')).toBe(
+      'Proforma_Invoice_SNT_PI_101.docx',
+    );
+    expect(makeInvoiceFilename('proforma', 'A/B:C*D?')).toBe(
+      'Proforma_Invoice_A-B-C-D-.docx',
+    );
+  });
+
+  it('uses the invoice prefix for standard invoices', () => {
+    expect(makeInvoiceFilename('invoice', 'SNT-INV-2026-101')).toBe(
+      'Invoice_SNT-INV-2026-101.docx',
+    );
   });
 
   it('falls back to Draft when there is no usable number', () => {
-    expect(makeInvoiceFilename('')).toBe('Proforma_Invoice_Draft.docx');
-    expect(makeInvoiceFilename('???')).toBe('Proforma_Invoice_---.docx');
+    expect(makeInvoiceFilename('proforma', '')).toBe('Proforma_Invoice_Draft.docx');
+    expect(makeInvoiceFilename('invoice', '???')).toBe('Invoice_---.docx');
   });
 });

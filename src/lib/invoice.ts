@@ -2,11 +2,66 @@ import { z } from 'zod';
 import { formatINR, formatINRWithoutSymbol, parseMoneyInput, sumPaise } from './money';
 import { formatDateDDMMYYYY, isValidISODate, todayISO } from './date';
 
-export const DEFAULT_LABELS = {
-  total: 'Estimated Total',
-  advance: 'Amount Payable in Advance',
-  balance: 'Balance',
+export const DOCUMENT_TYPES = {
+  proforma: {
+    label: 'Proforma invoice',
+    shortLabel: 'Proforma',
+    previewTitle: 'PROFORMA INVOICE',
+    numberLabel: 'Proforma No:',
+    formNumberLabel: 'Proforma Invoice Number',
+    numberPlaceholder: 'e.g. SNT-PI-2026-101',
+    numberErrorLabel: 'Proforma invoice number',
+    filenamePrefix: 'Proforma_Invoice',
+    footer: 'This is a proforma invoice, not a tax invoice or proof of payment.',
+    templatePath: 'templates/shifra-proforma-template.docx',
+    labels: {
+      total: 'Estimated Total',
+      advance: 'Amount Payable in Advance',
+      balance: 'Balance',
+    },
+    summaryTitle: 'Estimated total, advance and balance',
+    summaryDescription:
+      'The estimated total comes from the included line items. Enter the advance manually; the balance is calculated as estimated total minus advance.',
+    totalOverrideLabel: 'Override the estimated total manually',
+    manualTotalLabel: 'Manual estimated total',
+    advanceHint: 'Leave blank if no advance has been paid.',
+    advanceExceedsMessage:
+      'The advance is higher than the estimated total, so the balance is negative. Review the payment figures before sending the invoice.',
+    totalInvalidMessage:
+      'The estimated total cannot be calculated until every included line amount is valid.',
+    advanceLabelField: 'Advance label',
+  },
+  invoice: {
+    label: 'Invoice',
+    shortLabel: 'Invoice',
+    previewTitle: 'INVOICE',
+    numberLabel: 'Invoice No:',
+    formNumberLabel: 'Invoice Number',
+    numberPlaceholder: 'e.g. SNT-INV-2026-101',
+    numberErrorLabel: 'Invoice number',
+    filenamePrefix: 'Invoice',
+    footer: 'Please quote the invoice number when making payment.',
+    templatePath: 'templates/shifra-invoice-template.docx',
+    labels: {
+      total: 'Total Amount',
+      advance: 'Amount Received',
+      balance: 'Balance Due',
+    },
+    summaryTitle: 'Total, amount received and balance',
+    summaryDescription:
+      'The total comes from the included line items. Enter the amount received manually; the balance is calculated as total minus amount received.',
+    totalOverrideLabel: 'Override the total manually',
+    manualTotalLabel: 'Manual total',
+    advanceHint: 'Leave blank if nothing has been received yet.',
+    advanceExceedsMessage:
+      'The amount received is higher than the total, so the balance is negative. Review the payment figures before sending the invoice.',
+    totalInvalidMessage:
+      'The total cannot be calculated until every included line amount is valid.',
+    advanceLabelField: 'Received label',
+  },
 } as const;
+
+export type DocumentType = keyof typeof DOCUMENT_TYPES;
 
 export type LineItem = {
   id: string;
@@ -17,12 +72,13 @@ export type LineItem = {
 };
 
 export type InvoiceForm = {
+  documentType: DocumentType;
   clientName: string;
   clientAddress: string;
   clientPhone: string;
   clientEmail: string;
   serviceName: string;
-  proformaNumber: string;
+  documentNumber: string;
   invoiceDate: string;
   items: LineItem[];
   advance: string;
@@ -67,7 +123,7 @@ export type InvoiceDocxData = {
   clientAddress: string;
   clientContact: string;
   serviceName: string;
-  proformaNumber: string;
+  documentNumber: string;
   invoiceDate: string;
   totalLabel: string;
   advanceLabel: string;
@@ -113,27 +169,29 @@ export function makeSampleItems(): LineItem[] {
   return SAMPLE_ITEM_DATA.map((row) => createLineItem(row));
 }
 
-export function createInitialForm(): InvoiceForm {
+export function createInitialForm(documentType: DocumentType = 'proforma'): InvoiceForm {
+  const labels = DOCUMENT_TYPES[documentType].labels;
   return {
+    documentType,
     clientName: '',
     clientAddress: '',
     clientPhone: '',
     clientEmail: '',
     serviceName: '',
-    proformaNumber: '',
+    documentNumber: '',
     invoiceDate: todayISO(),
     items: makeSampleItems(),
     advance: '',
     overrideTotal: false,
     totalOverride: '',
-    totalLabel: DEFAULT_LABELS.total,
-    advanceLabel: DEFAULT_LABELS.advance,
-    balanceLabel: DEFAULT_LABELS.balance,
+    totalLabel: labels.total,
+    advanceLabel: labels.advance,
+    balanceLabel: labels.balance,
   };
 }
 
-export function createBlankForm(): InvoiceForm {
-  return { ...createInitialForm(), items: [] };
+export function createBlankForm(documentType: DocumentType = 'proforma'): InvoiceForm {
+  return { ...createInitialForm(documentType), items: [] };
 }
 
 function isBlankRow(item: LineItem): boolean {
@@ -266,53 +324,57 @@ const optionalEmail = z
     'Enter a valid email address.',
   );
 
-const staticSchema = z.object({
-  clientName: z
-    .string()
-    .trim()
-    .min(1, 'Client / business name is required.')
-    .max(160, 'Client / business name is too long.'),
-  clientAddress: z
-    .string()
-    .trim()
-    .min(1, 'Client address is required.')
-    .max(600, 'Client address is too long.'),
-  clientPhone: optionalPhone,
-  clientEmail: optionalEmail,
-  serviceName: z
-    .string()
-    .trim()
-    .min(1, 'Service / invoice title is required.')
-    .max(200, 'Service / invoice title is too long.'),
-  proformaNumber: z
-    .string()
-    .trim()
-    .min(1, 'Proforma invoice number is required.')
-    .max(80, 'Proforma invoice number is too long.')
-    .refine(
-      (value) => !/[\r\n\t]/.test(value),
-      'Proforma invoice number cannot contain line breaks.',
-    ),
-  invoiceDate: z
-    .string()
-    .min(1, 'Invoice date is required.')
-    .refine(isValidISODate, 'Enter a valid invoice date.'),
-  totalLabel: z
-    .string()
-    .trim()
-    .min(1, 'Estimated total label is required.')
-    .max(60, 'Label is too long.'),
-  advanceLabel: z
-    .string()
-    .trim()
-    .min(1, 'Advance label is required.')
-    .max(60, 'Label is too long.'),
-  balanceLabel: z
-    .string()
-    .trim()
-    .min(1, 'Balance label is required.')
-    .max(60, 'Label is too long.'),
-});
+function makeStaticSchema(documentType: DocumentType) {
+  const config = DOCUMENT_TYPES[documentType];
+  return z.object({
+    documentType: z.enum(['proforma', 'invoice']),
+    clientName: z
+      .string()
+      .trim()
+      .min(1, 'Client / business name is required.')
+      .max(160, 'Client / business name is too long.'),
+    clientAddress: z
+      .string()
+      .trim()
+      .min(1, 'Client address is required.')
+      .max(600, 'Client address is too long.'),
+    clientPhone: optionalPhone,
+    clientEmail: optionalEmail,
+    serviceName: z
+      .string()
+      .trim()
+      .min(1, 'Service / invoice title is required.')
+      .max(200, 'Service / invoice title is too long.'),
+    documentNumber: z
+      .string()
+      .trim()
+      .min(1, `${config.numberErrorLabel} is required.`)
+      .max(80, `${config.numberErrorLabel} is too long.`)
+      .refine(
+        (value) => !/[\r\n\t]/.test(value),
+        `${config.numberErrorLabel} cannot contain line breaks.`,
+      ),
+    invoiceDate: z
+      .string()
+      .min(1, 'Invoice date is required.')
+      .refine(isValidISODate, 'Enter a valid invoice date.'),
+    totalLabel: z
+      .string()
+      .trim()
+      .min(1, 'Total label is required.')
+      .max(60, 'Label is too long.'),
+    advanceLabel: z
+      .string()
+      .trim()
+      .min(1, `${config.advanceLabelField} is required.`)
+      .max(60, 'Label is too long.'),
+    balanceLabel: z
+      .string()
+      .trim()
+      .min(1, 'Balance label is required.')
+      .max(60, 'Label is too long.'),
+  });
+}
 
 export type ValidationResult = {
   success: boolean;
@@ -324,7 +386,7 @@ export function validateInvoice(form: InvoiceForm): ValidationResult {
   const errors: Record<string, string> = {};
   const itemErrors: Record<string, ItemErrors> = {};
 
-  const parsed = staticSchema.safeParse(form);
+  const parsed = makeStaticSchema(form.documentType).safeParse(form);
   if (!parsed.success) {
     for (const issue of parsed.error.issues) {
       const key = issue.path.join('.');
@@ -376,7 +438,7 @@ export function buildDocxData(
     clientAddress: form.clientAddress.trim(),
     clientContact: contact,
     serviceName: form.serviceName.trim(),
-    proformaNumber: form.proformaNumber.trim(),
+    documentNumber: form.documentNumber.trim(),
     invoiceDate: formatDateDDMMYYYY(form.invoiceDate),
     totalLabel: form.totalLabel.trim(),
     advanceLabel: form.advanceLabel.trim(),
@@ -388,12 +450,15 @@ export function buildDocxData(
   };
 }
 
-export function makeInvoiceFilename(proformaNumber: string): string {
-  const safe = proformaNumber
+export function makeInvoiceFilename(
+  documentType: DocumentType,
+  documentNumber: string,
+): string {
+  const safe = documentNumber
     .trim()
     .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '-')
     .replace(/\s+/g, '_')
     .replace(/[. ]+$/g, '')
     .slice(0, 80);
-  return `Proforma_Invoice_${safe || 'Draft'}.docx`;
+  return `${DOCUMENT_TYPES[documentType].filenamePrefix}_${safe || 'Draft'}.docx`;
 }

@@ -13,6 +13,7 @@ import {
   cx,
 } from './components/ui';
 import {
+  DOCUMENT_TYPES,
   buildDocxData,
   calculateInvoice,
   createInitialForm,
@@ -20,6 +21,7 @@ import {
   makeInvoiceFilename,
   makeSampleItems,
   validateInvoice,
+  type DocumentType,
   type InvoiceForm,
   type LineItem,
 } from './lib/invoice';
@@ -49,9 +51,28 @@ export default function App() {
 
   const calculation = useMemo(() => calculateInvoice(form), [form]);
   const validation = useMemo(() => validateInvoice(form), [form]);
+  const documentConfig = DOCUMENT_TYPES[form.documentType];
 
   function updateField<K extends keyof InvoiceForm>(key: K, value: InvoiceForm[K]) {
     setForm((current) => ({ ...current, [key]: value }));
+    setStatus(null);
+  }
+
+  function changeDocumentType(documentType: DocumentType) {
+    setForm((current) => {
+      if (current.documentType === documentType) return current;
+      const previousLabels = DOCUMENT_TYPES[current.documentType].labels;
+      const nextLabels = DOCUMENT_TYPES[documentType].labels;
+      const label = (value: string, previousDefault: string, nextDefault: string) =>
+        value.trim() && value.trim() !== previousDefault ? value : nextDefault;
+      return {
+        ...current,
+        documentType,
+        totalLabel: label(current.totalLabel, previousLabels.total, nextLabels.total),
+        advanceLabel: label(current.advanceLabel, previousLabels.advance, nextLabels.advance),
+        balanceLabel: label(current.balanceLabel, previousLabels.balance, nextLabels.balance),
+      };
+    });
     setStatus(null);
   }
 
@@ -125,7 +146,7 @@ export default function App() {
   }
 
   function resetForm() {
-    setForm(createInitialForm());
+    setForm((current) => createInitialForm(current.documentType));
     setShowValidation(false);
     setLastAddedId(null);
     setStatus({ type: 'info', message: 'Form reset. Sample line items restored.' });
@@ -170,15 +191,15 @@ export default function App() {
       const { docxBlob, downloadBlob, loadInvoiceTemplate, renderInvoiceDocx } = await import(
         './lib/docx'
       );
-      const template = await loadInvoiceTemplate();
+      const template = await loadInvoiceTemplate(form.documentType);
       const currentCalculation = calculateInvoice(form);
       const data = buildDocxData(form, currentCalculation);
       const bytes = renderInvoiceDocx(template, data);
-      const filename = makeInvoiceFilename(form.proformaNumber);
+      const filename = makeInvoiceFilename(form.documentType, form.documentNumber);
       downloadBlob(docxBlob(bytes), filename);
       setStatus({
         type: 'success',
-        message: `Word document downloaded as ${filename}. It uses the original Shifra Nuha template.`,
+        message: `Word document downloaded as ${filename}. It uses the matching original Shifra Nuha ${documentConfig.shortLabel.toLowerCase()} template.`,
       });
     } catch (error) {
       let detail = 'The template could not be loaded.';
@@ -211,7 +232,10 @@ export default function App() {
         'Print dialog opened. Choose “Save as PDF” in the dialog to create a PDF; the app does not create a PDF directly.',
     });
     const previousTitle = document.title;
-    document.title = makeInvoiceFilename(form.proformaNumber).replace(/\.docx$/, '');
+    document.title = makeInvoiceFilename(form.documentType, form.documentNumber).replace(
+      /\.docx$/,
+      '',
+    );
     window.print();
     window.setTimeout(() => {
       document.title = previousTitle;
@@ -240,7 +264,7 @@ export default function App() {
                   Invoice Generator
                 </h1>
                 <p className="mt-0.5 text-[11px] text-muted">
-                  Proforma invoices based on the original Word template.
+                  Proforma invoices and invoices from the original Word templates.
                 </p>
               </div>
             </div>
@@ -317,6 +341,7 @@ export default function App() {
               <EditorPanel
                 form={form}
                 updateField={updateField}
+                onChangeDocumentType={changeDocumentType}
                 calculation={calculation}
                 validation={validation}
                 showValidation={showValidation}
@@ -346,7 +371,7 @@ export default function App() {
                     <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan">
                       Live preview
                     </p>
-                    <p className="text-xs font-bold text-ink">A4 · Proforma invoice</p>
+                    <p className="text-xs font-bold text-ink">A4 · {documentConfig.label}</p>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <button
@@ -389,7 +414,7 @@ export default function App() {
               service. No accounts, analytics or permanent storage are used.
             </p>
             <p className="mt-1">
-              Generated Word files use the original Shifra Nuha Technologies proforma template.
+              Generated Word files use the matching original Shifra Nuha Technologies template.
             </p>
           </footer>
         </main>
