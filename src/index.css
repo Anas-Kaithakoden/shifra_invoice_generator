@@ -384,6 +384,7 @@ select {
 
 .inv-bank td {
   width: 78.21%;
+  overflow-wrap: anywhere;
 }
 
 .inv-footer {

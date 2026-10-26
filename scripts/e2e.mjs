@@ -138,8 +138,8 @@ try {
   await page.goto(baseURL, { waitUntil: 'networkidle' });
   await page.waitForSelector('.preview-scale-source .inv-items tbody tr');
 
-  assert.match(await page.title(), /Invoice Generator/);
-  assert.equal(await page.locator('h1').textContent(), 'Invoice Generator');
+  assert.match(await page.title(), /Invoice & Receipt Generator/);
+  assert.equal(await page.locator('h1').textContent(), 'Invoice & Receipt Generator');
   assert.equal(
     await page.locator('.preview-scale-source .inv-items tbody tr').count(),
     6,
@@ -151,6 +151,7 @@ try {
   );
   assert.equal(await page.getByRole('radio', { name: /^Proforma invoice/ }).isChecked(), true);
   assert.equal(await page.getByRole('radio', { name: /^Invoice/ }).isChecked(), false);
+  assert.equal(await page.getByRole('radio', { name: /^Receipt/ }).isChecked(), false);
   assert.equal(await page.getByLabel('Client / Business Name').inputValue(), '');
   assert.equal(await page.getByLabel('Proforma Invoice Number').inputValue(), '');
   assert.match(await page.getByLabel('Invoice Date').inputValue(), /^\d{4}-\d{2}-\d{2}$/);
@@ -331,7 +332,7 @@ try {
   assert.equal(await page.evaluate(() => window.__printCalls), 1);
   assert.match(await page.title(), /Proforma_Invoice_SNT-PI-2026-101/);
   await page.waitForTimeout(1200);
-  assert.equal(await page.title(), 'Invoice Generator | Shifra Nuha Technologies');
+  assert.equal(await page.title(), 'Invoice & Receipt Generator | Shifra Nuha Technologies');
 
   const onePagePdfPath = join(outputDir, 'invoice-six-items.pdf');
   await page.emulateMedia({ media: 'print' });
@@ -409,6 +410,108 @@ try {
   const invoiceFooterY = footerBaseline(invoicePage, 'Please quote the invoice number');
   assert.ok(invoiceFooterY > 20 && invoiceFooterY < 60, `invoice footer y=${invoiceFooterY}`);
 
+  // A receipt reuses the client details with fixed receipt payment labels.
+  await page.emulateMedia({ media: 'screen' });
+  await page.getByRole('radio', { name: /^Receipt/ }).check();
+  await waitForPreviewText(page, 'Receipt No:');
+  const receiptPreview = await previewText(page);
+  assert.ok(receiptPreview.includes('RECEIVED FROM'));
+  assert.ok(receiptPreview.includes('PAYMENT FOR'));
+  assert.ok(receiptPreview.includes('This receipt acknowledges payment received.'));
+  assert.ok(!receiptPreview.includes('This is a proforma invoice'));
+  assert.ok(!receiptPreview.includes('Please quote the invoice number'));
+  assert.deepEqual(
+    await page.locator('.preview-scale-source .inv-summary th').allTextContents(),
+    ['Amount Received', 'Invoice Total', 'Balance Due'],
+  );
+  assert.equal(await page.locator('.preview-scale-source .inv-items tbody tr').count(), 1);
+  assert.equal(await page.getByRole('button', { name: 'Add item', exact: true }).count(), 0);
+
+  await page.getByLabel('Receipt Number').fill('SNT-RCT-2026-101');
+  await page
+    .getByLabel('Payment For / Description')
+    .fill('Payment against invoice SNT-INV-2026-101');
+  await page.getByLabel('Receipt Date').fill('2026-11-06');
+  await page.getByLabel('Invoice Number').fill('SNT-INV-2026-101');
+  await page.getByLabel('Payment Date').fill('2026-11-06');
+  await page.getByLabel('Payment Mode').fill('Bank Transfer');
+  await page.getByLabel('Reference No.').fill('UTR12345');
+  await page.getByLabel('Amount Received').fill('5000');
+  await page.getByLabel('Invoice Total').fill('20000');
+  await waitForPreviewText(page, '₹15,000.00');
+  const filledReceiptPreview = await previewText(page);
+  assert.ok(
+    filledReceiptPreview.includes(
+      'Payment received against Invoice No. SNT-INV-2026-101',
+    ),
+  );
+  assert.ok(filledReceiptPreview.includes('06/11/2026'));
+  assert.ok(filledReceiptPreview.includes('Bank Transfer'));
+  assert.ok(filledReceiptPreview.includes('UTR12345'));
+  assert.equal(await page.getByTestId('summary-balance').textContent(), '₹15,000.00');
+
+  const receiptDownloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download Word' }).click();
+  const receiptDownload = await receiptDownloadPromise;
+  await page
+    .getByText(/Word document downloaded as Receipt_SNT-RCT-2026-101\.docx/)
+    .waitFor();
+  assert.equal(receiptDownload.suggestedFilename(), 'Receipt_SNT-RCT-2026-101.docx');
+  const receiptDocxPath = join(outputDir, receiptDownload.suggestedFilename());
+  await receiptDownload.saveAs(receiptDocxPath);
+  const receiptZip = new PizZip(readFileSync(receiptDocxPath));
+  const receiptDocumentXml = receiptZip.file('word/document.xml').asText();
+  const receiptFooterXml = receiptZip.file('word/footer1.xml').asText();
+  assert.ok(receiptDocumentXml.includes('RECEIPT'));
+  assert.ok(receiptDocumentXml.includes('Receipt No:'));
+  assert.ok(receiptDocumentXml.includes('SNT-RCT-2026-101'));
+  assert.ok(receiptDocumentXml.includes('RECEIVED FROM'));
+  assert.ok(receiptDocumentXml.includes('PAYMENT FOR'));
+  assert.ok(receiptDocumentXml.includes('Payment received against Invoice No. SNT-INV-2026-101'));
+  assert.ok(receiptDocumentXml.includes('₹5,000.00'));
+  assert.ok(receiptDocumentXml.includes('₹20,000.00'));
+  assert.ok(receiptDocumentXml.includes('₹15,000.00'));
+  assert.ok(receiptDocumentXml.includes('Bank Transfer'));
+  assert.ok(receiptDocumentXml.includes('UTR12345'));
+  assert.ok(receiptDocumentXml.includes('06/11/2026'));
+  assert.ok(receiptDocumentXml.includes('RECEIVED BY'));
+  assert.ok(receiptDocumentXml.includes('Shifra Nuha Technologies'));
+  assert.ok(!receiptDocumentXml.includes('ACCOUNT HOLDER:'));
+  assert.ok(!receiptDocumentXml.includes('{receiptAmount}'));
+  assert.ok(!receiptDocumentXml.includes('{paymentMode}'));
+  assert.ok(receiptDocumentXml.includes('<w:pgSz w:w="11906" w:h="16838"'));
+  assert.ok(receiptFooterXml.includes('This receipt acknowledges payment received'));
+  assert.ok(!receiptFooterXml.includes('This is a proforma invoice'));
+
+  await page.getByRole('button', { name: 'Print / Save as PDF' }).click();
+  await page.getByText(/Print dialog opened/).waitFor();
+  assert.match(await page.title(), /Receipt_SNT-RCT-2026-101/);
+  const receiptPdfPath = join(outputDir, 'receipt.pdf');
+  await page.emulateMedia({ media: 'print' });
+  await page.pdf({ path: receiptPdfPath, preferCSSPageSize: true, printBackground: true });
+  const receiptPdfPages = await readPdf(receiptPdfPath);
+  assert.equal(receiptPdfPages.length, 1, 'receipt should print on one page');
+  const receiptPage = receiptPdfPages[0];
+  assert.ok(Math.abs(receiptPage.width - 595.32) < 1);
+  assert.ok(Math.abs(receiptPage.height - 841.92) < 1);
+  assert.ok(receiptPage.text.includes('RECEIPT'));
+  assert.ok(receiptPage.text.includes('R E C E I V E D'));
+  assert.ok(receiptPage.text.includes('P A Y M E N T'));
+  assert.ok(receiptPage.text.includes('Payment received against Invoice No. SNT-INV-2026-101'));
+  assert.ok(receiptPage.text.includes('Amount Received'));
+  assert.ok(receiptPage.text.includes('Invoice Total'));
+  assert.ok(receiptPage.text.includes('Balance Due'));
+  assert.ok(receiptPage.text.includes('PAYMENT MODE:'));
+  assert.ok(receiptPage.text.includes('Bank Transfer'));
+  assert.ok(receiptPage.text.includes('REFERENCE NO:'));
+  assert.ok(receiptPage.text.includes('UTR12345'));
+  assert.ok(receiptPage.text.includes('RECEIVED BY:'));
+  assert.ok(receiptPage.text.includes('This receipt acknowledges payment received'));
+  assert.ok(receiptPage.text.includes('Thank you for choosing Shifra Nuha Technologies'));
+  assert.ok(!receiptPage.text.includes('ACCOUNT HOLDER:'));
+  const receiptFooterY = footerBaseline(receiptPage, 'This receipt acknowledges payment');
+  assert.ok(receiptFooterY > 20 && receiptFooterY < 60, `receipt footer y=${receiptFooterY}`);
+
   // Switch back before the multi-page proforma check.
   await page.emulateMedia({ media: 'screen' });
   await page.getByRole('radio', { name: /^Proforma invoice/ }).check();
@@ -421,7 +524,7 @@ try {
 
   // Many rows must paginate, repeat the table header and keep the footer on every page.
   await page.emulateMedia({ media: 'screen' });
-  await page.getByRole('button', { name: 'Edit invoice' }).click().catch(() => {});
+  await page.getByRole('button', { name: 'Edit details' }).click().catch(() => {});
   for (let index = 7; index <= 24; index += 1) {
     await page.getByRole('button', { name: 'Add item', exact: true }).click();
     await page.getByLabel(`Description for item ${index}`).fill(`Additional service ${index}`);
@@ -490,7 +593,7 @@ try {
   assert.ok(mobilePreview.sizerWidth <= mobilePreview.containerWidth);
   assert.ok(mobilePreview.scrollWidth <= mobilePreview.clientWidth + 1);
   assert.equal(await page.locator('.preview-scale-source .inv-items tbody tr').count(), 6);
-  await page.getByRole('button', { name: 'Edit invoice' }).click();
+  await page.getByRole('button', { name: 'Edit details' }).click();
   assert.equal(await page.getByLabel('Client / Business Name').isVisible(), true);
   assert.equal(await page.locator('aside').isVisible(), false);
 
@@ -512,6 +615,8 @@ try {
         multiPageCount: pdfPages.length,
         invoiceWordFile: invoiceDocxPath,
         invoicePdf: invoicePdfPath,
+        receiptWordFile: receiptDocxPath,
+        receiptPdf: receiptPdfPath,
         outputDir,
       },
       null,

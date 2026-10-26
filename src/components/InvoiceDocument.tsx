@@ -7,9 +7,59 @@ import {
 import { formatINR, formatINRWithoutSymbol } from '../lib/money';
 import { formatDateDDMMYYYY } from '../lib/date';
 
-function placeholder(text: string, fallback: string, className = '') {
+export function placeholder(text: string, fallback: string, className = '') {
   if (text) return <span className={className}>{text}</span>;
   return <span className={`inv-placeholder ${className}`}>{fallback}</span>;
+}
+
+export function DocumentHeader({
+  title,
+  numberLabel,
+  number,
+  dateText,
+}: {
+  title: string;
+  numberLabel: string;
+  number: string;
+  dateText: string;
+}) {
+  return (
+    <header className="inv-header">
+      <div className="inv-logo-cell">
+        <img
+          src={`${import.meta.env.BASE_URL}shifra-logo.png`}
+          alt="Shifra Nuha Technologies"
+          className="inv-logo"
+        />
+      </div>
+      <div className="inv-company">
+        <div className="inv-company-name">SHIFRA NUHA TECHNOLOGIES</div>
+        <div className="inv-tagline">Business Registration &amp; Professional Support</div>
+        <div className="inv-company-line">Ryan Complex, Chungathara, Malappuram, 679334</div>
+        <div className="inv-company-line">+91 9447979616 | info@shifranuhatech.com</div>
+      </div>
+      <div className="inv-title-block">
+        <div className="inv-doc-title">{title}</div>
+        <div className="inv-meta">
+          <span className="inv-meta-label">{numberLabel}&nbsp; </span>
+          {placeholder(number, '—', 'inv-meta-value')}
+        </div>
+        <div className="inv-meta inv-meta-date">
+          <span className="inv-meta-label">Date:&nbsp; </span>
+          <span className="inv-meta-value">{dateText || 'DD/MM/YYYY'}</span>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+export function DocumentFooter({ footer }: { footer: string }) {
+  return (
+    <footer className="inv-footer">
+      <div>{footer}</div>
+      <div>Thank you for choosing Shifra Nuha Technologies.</div>
+    </footer>
+  );
 }
 
 export function InvoiceDocument({
@@ -32,36 +82,18 @@ export function InvoiceDocument({
   const balance = calculation.balancePaise;
 
   return (
-    <div className="invoice-page" data-testid="invoice-page">
+    <div
+      className="invoice-page"
+      data-testid="invoice-page"
+      data-document-type={form.documentType}
+    >
       <div className="invoice-content">
-        <header className="inv-header">
-          <div className="inv-logo-cell">
-            <img
-              src={`${import.meta.env.BASE_URL}shifra-logo.png`}
-              alt="Shifra Nuha Technologies"
-              className="inv-logo"
-            />
-          </div>
-          <div className="inv-company">
-            <div className="inv-company-name">SHIFRA NUHA TECHNOLOGIES</div>
-            <div className="inv-tagline">Business Registration &amp; Professional Support</div>
-            <div className="inv-company-line">Ryan Complex, Chungathara, Malappuram, 679334</div>
-            <div className="inv-company-line">+91 9447979616 | info@shifranuhatech.com</div>
-          </div>
-          <div className="inv-title-block">
-            <div className="inv-doc-title">{config.previewTitle}</div>
-            <div className="inv-meta">
-              <span className="inv-meta-label">{config.numberLabel}&nbsp; </span>
-              {placeholder(form.documentNumber.trim(), '—', 'inv-meta-value')}
-            </div>
-            <div className="inv-meta inv-meta-date">
-              <span className="inv-meta-label">Date:&nbsp; </span>
-              <span className="inv-meta-value">
-                {form.invoiceDate ? formatDateDDMMYYYY(form.invoiceDate) || 'DD/MM/YYYY' : 'DD/MM/YYYY'}
-              </span>
-            </div>
-          </div>
-        </header>
+        <DocumentHeader
+          title={config.previewTitle}
+          numberLabel={config.numberLabel}
+          number={form.documentNumber.trim()}
+          dateText={formatDateDDMMYYYY(form.invoiceDate)}
+        />
 
         <div className="inv-rule" />
 
@@ -180,10 +212,7 @@ export function InvoiceDocument({
         </div>
       </div>
 
-      <footer className="inv-footer">
-        <div>{config.footer}</div>
-        <div>Thank you for choosing Shifra Nuha Technologies.</div>
-      </footer>
+      <DocumentFooter footer={config.footer} />
     </div>
   );
 }

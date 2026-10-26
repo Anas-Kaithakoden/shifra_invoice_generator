@@ -8,6 +8,7 @@ import {
 } from '../lib/invoice';
 import { LineItemsEditor } from './LineItemsEditor';
 import { PaymentSummaryEditor } from './PaymentSummaryEditor';
+import { ReceiptPaymentEditor } from './ReceiptPaymentEditor';
 import {
   Alert,
   Button,
@@ -21,11 +22,12 @@ import {
   cx,
 } from './ui';
 
-const DOCUMENT_TYPE_ORDER: DocumentType[] = ['proforma', 'invoice'];
+const DOCUMENT_TYPE_ORDER: DocumentType[] = ['proforma', 'invoice', 'receipt'];
 
 const DOCUMENT_TYPE_DESCRIPTIONS: Record<DocumentType, string> = {
   proforma: 'An estimate or request for advance before the work is completed.',
   invoice: 'A final bill for completed work and payment received.',
+  receipt: 'Acknowledges a payment received against an invoice.',
 };
 
 export function EditorPanel({
@@ -80,7 +82,7 @@ export function EditorPanel({
         <div
           role="radiogroup"
           aria-label="Document type"
-          className="grid gap-2 sm:grid-cols-2"
+          className="grid gap-2 sm:grid-cols-3"
         >
           {DOCUMENT_TYPE_ORDER.map((documentType) => {
             const option = DOCUMENT_TYPES[documentType];
@@ -117,8 +119,8 @@ export function EditorPanel({
 
       <Section
         eyebrow="02 · Client details"
-        title="Bill to"
-        description="Phone and email are optional. The address can span multiple lines."
+        title={documentConfig.clientSectionTitle}
+        description={documentConfig.clientSectionDescription}
       >
         <div className="grid gap-4">
           <Field
@@ -184,13 +186,13 @@ export function EditorPanel({
       </Section>
 
       <Section
-        eyebrow="03 · Invoice details"
-        title="Service and document reference"
-        description="The service title appears in the template's SERVICE area. The number and date appear in the header; the date is printed as DD/MM/YYYY."
+        eyebrow={form.documentType === 'receipt' ? '03 · Receipt details' : '03 · Invoice details'}
+        title={documentConfig.detailsTitle}
+        description={documentConfig.detailsDescription}
       >
         <div className="grid gap-4">
           <Field
-            label="Service Name / Invoice Title"
+            label={documentConfig.serviceFieldLabel}
             htmlFor="service-name"
             error={showError('serviceName')}
           >
@@ -198,7 +200,7 @@ export function EditorPanel({
               id="service-name"
               value={form.serviceName}
               onChange={(event) => updateField('serviceName', event.target.value)}
-              placeholder="e.g. Private Limited Company Registration"
+              placeholder={documentConfig.serviceFieldPlaceholder}
               maxLength={200}
               autoComplete="off"
               aria-invalid={Boolean(showError('serviceName')) || undefined}
@@ -223,7 +225,7 @@ export function EditorPanel({
               />
             </Field>
             <Field
-              label="Invoice Date"
+              label={documentConfig.dateLabel}
               htmlFor="invoice-date"
               error={showError('invoiceDate')}
               hint="Stored as a date; shown as DD/MM/YYYY."
@@ -241,27 +243,39 @@ export function EditorPanel({
         </div>
       </Section>
 
-      <LineItemsEditor
-        form={form}
-        calculation={calculation}
-        showValidation={showValidation}
-        itemErrors={validation.itemErrors}
-        lastAddedId={lastAddedId}
-        onAddItem={onAddItem}
-        onChangeItem={onChangeItem}
-        onDeleteItem={onDeleteItem}
-        onMoveItem={onMoveItem}
-        onLoadSample={onLoadSample}
-        onClearItems={onClearItems}
-      />
+      {form.documentType === 'receipt' ? (
+        <ReceiptPaymentEditor
+          form={form}
+          updateField={updateField}
+          calculation={calculation}
+          showValidation={showValidation}
+          errors={validation.errors}
+        />
+      ) : (
+        <>
+          <LineItemsEditor
+            form={form}
+            calculation={calculation}
+            showValidation={showValidation}
+            itemErrors={validation.itemErrors}
+            lastAddedId={lastAddedId}
+            onAddItem={onAddItem}
+            onChangeItem={onChangeItem}
+            onDeleteItem={onDeleteItem}
+            onMoveItem={onMoveItem}
+            onLoadSample={onLoadSample}
+            onClearItems={onClearItems}
+          />
 
-      <PaymentSummaryEditor
-        form={form}
-        updateField={updateField}
-        calculation={calculation}
-        showValidation={showValidation}
-        errors={validation.errors}
-      />
+          <PaymentSummaryEditor
+            form={form}
+            updateField={updateField}
+            calculation={calculation}
+            showValidation={showValidation}
+            errors={validation.errors}
+          />
+        </>
+      )}
 
       <section className="rounded-lg border border-line bg-white px-4 py-4 sm:px-5" id="actions">
         {showValidation && !validation.success ? (
@@ -314,7 +328,7 @@ export function EditorPanel({
       </section>
 
       <p className="px-1 text-[11px] leading-relaxed text-slate-500">
-        Invoice data stays in this browser tab. Nothing is uploaded, saved to a database, or
+        Document data stays in this browser tab. Nothing is uploaded, saved to a database, or
         included in analytics.
       </p>
     </div>

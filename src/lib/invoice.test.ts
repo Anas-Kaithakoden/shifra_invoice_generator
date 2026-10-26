@@ -22,6 +22,20 @@ function requiredForm(overrides: Partial<InvoiceForm> = {}): InvoiceForm {
   };
 }
 
+function requiredReceiptForm(overrides: Partial<InvoiceForm> = {}): InvoiceForm {
+  return {
+    ...createInitialForm('receipt'),
+    clientName: 'Acme Trading',
+    clientAddress: '12 Market Road\nKochi, Kerala 682001',
+    serviceName: 'Payment against invoice SNT-INV-2026-101',
+    documentNumber: 'SNT-RCT-2026-101',
+    invoiceNumber: 'SNT-INV-2026-101',
+    invoiceTotal: '20000',
+    advance: '5000',
+    ...overrides,
+  };
+}
+
 function itemsFrom(rows: Array<[string, string, string, boolean?]>) {
   return rows.map(([description, qty, amount, included = true]) =>
     createLineItem({ description, qty, amount, included }),
@@ -39,6 +53,11 @@ describe('initial form and sample data', () => {
     expect(form.serviceName).toBe('');
     expect(form.documentNumber).toBe('');
     expect(form.invoiceDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(form.invoiceNumber).toBe('');
+    expect(form.invoiceTotal).toBe('');
+    expect(form.paymentDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(form.paymentMode).toBe('');
+    expect(form.paymentReference).toBe('');
     expect(form.items).toHaveLength(6);
     expect(form.advance).toBe('');
     expect(form.overrideTotal).toBe(false);
@@ -51,6 +70,15 @@ describe('initial form and sample data', () => {
     expect(form.totalLabel).toBe(DOCUMENT_TYPES.invoice.labels.total);
     expect(form.advanceLabel).toBe(DOCUMENT_TYPES.invoice.labels.advance);
     expect(form.balanceLabel).toBe(DOCUMENT_TYPES.invoice.labels.balance);
+  });
+
+  it('uses receipt-specific default labels and payment date', () => {
+    const form = createInitialForm('receipt');
+    expect(form.documentType).toBe('receipt');
+    expect(form.totalLabel).toBe(DOCUMENT_TYPES.receipt.labels.total);
+    expect(form.advanceLabel).toBe(DOCUMENT_TYPES.receipt.labels.advance);
+    expect(form.balanceLabel).toBe(DOCUMENT_TYPES.receipt.labels.balance);
+    expect(form.paymentDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
   it('creates unique row ids and independent sample arrays', () => {
@@ -156,6 +184,47 @@ describe('calculateInvoice', () => {
     expect(calculation.totalOverrideActive).toBe(true);
     expect(calculation.hasErrors).toBe(true);
   });
+
+  it('calculates receipt totals from the invoice total and amount received', () => {
+    const calculation = calculateInvoice(requiredReceiptForm());
+    expect(calculation.totalPaise).toBe(2_000_000);
+    expect(calculation.effectiveTotalPaise).toBe(2_000_000);
+    expect(calculation.advancePaise).toBe(500_000);
+    expect(calculation.balancePaise).toBe(1_500_000);
+    expect(calculation.includedItems).toEqual([]);
+    expect(calculation.outputItems).toEqual([]);
+    expect(calculation.itemErrorCount).toBe(0);
+    expect(calculation.hasErrors).toBe(false);
+  });
+
+  it('ignores invalid hidden line items on a receipt', () => {
+    const form = requiredReceiptForm({
+      items: [
+        createLineItem({ description: '', amount: 'bad' }),
+        createLineItem({ description: 'Bad quantity', qty: '1.5', amount: '100' }),
+      ],
+    });
+    const calculation = calculateInvoice(form);
+    expect(calculation.itemErrorCount).toBe(0);
+    expect(calculation.hasErrors).toBe(false);
+    expect(calculation.effectiveTotalPaise).toBe(2_000_000);
+  });
+
+  it('reports receipt errors and an overpayment balance', () => {
+    const missing = calculateInvoice(
+      requiredReceiptForm({ invoiceTotal: '', advance: '' }),
+    );
+    expect(missing.effectiveTotalPaise).toBeNull();
+    expect(missing.advancePaise).toBeNull();
+    expect(missing.balancePaise).toBeNull();
+    expect(missing.hasErrors).toBe(true);
+
+    const overpaid = calculateInvoice(
+      requiredReceiptForm({ invoiceTotal: '20000', advance: '25000' }),
+    );
+    expect(overpaid.balancePaise).toBe(-500_000);
+    expect(overpaid.advanceExceedsTotal).toBe(true);
+  });
 });
 
 describe('validateInvoice', () => {
@@ -175,10 +244,14 @@ describe('validateInvoice', () => {
 
     const invoice = validateInvoice(createInitialForm('invoice'));
     expect(invoice.errors.documentNumber).toBe('Invoice number is required.');
+
+    const receipt = validateInvoice(createInitialForm('receipt'));
+    expect(receipt.errors.documentNumber).toBe('Receipt number is required.');
   });
 
   it('accepts a complete valid form', () => {
     expect(validateInvoice(requiredForm()).success).toBe(true);
+    expect(validateInvoice(requiredReceiptForm()).success).toBe(true);
   });
 
   it('validates optional phone and email when supplied', () => {
@@ -204,6 +277,46 @@ describe('validateInvoice', () => {
     expect(result.success).toBe(false);
     expect(result.errors.items).toBeDefined();
     expect(Object.keys(result.itemErrors)).toHaveLength(1);
+  });
+
+  it('requires the receipt invoice number, payment date and amounts', () => {
+    const form = requiredReceiptForm({
+      invoiceNumber: '',
+      paymentDate: '',
+      invoiceTotal: '',
+      advance: '',
+      totalLabel: '',
+      advanceLabel: '',
+      balanceLabel: '',
+    });
+    const result = validateInvoice(form);
+    expect(result.success).toBe(false);
+    expect(result.errors.invoiceNumber).toBe('Invoice number is required.');
+    expect(result.errors.paymentDate).toBe('Payment date is required.');
+    expect(result.errors.invoiceTotal).toBe('Enter an amount.');
+    expect(result.errors.advance).toBe('Enter an amount.');
+    expect(result.errors.totalLabel).toBeUndefined();
+    expect(result.errors.advanceLabel).toBeUndefined();
+    expect(result.errors.balanceLabel).toBeUndefined();
+  });
+
+  it('does not validate hidden line items or custom labels on a receipt', () => {
+    const form = requiredReceiptForm({
+      items: [
+        createLineItem({ description: '', amount: 'bad' }),
+        createLineItem({ description: 'Bad quantity', qty: '1.5', amount: '100' }),
+      ],
+      totalLabel: '',
+      advanceLabel: '',
+      balanceLabel: '',
+      overrideTotal: true,
+      totalOverride: '',
+    });
+    const result = validateInvoice(form);
+    expect(result.success).toBe(true);
+    expect(result.errors.items).toBeUndefined();
+    expect(result.errors.totalOverride).toBeUndefined();
+    expect(result.itemErrors).toEqual({});
   });
 
   it('validates the advance, override, date and labels', () => {
@@ -250,6 +363,30 @@ describe('buildDocxData', () => {
       amount: '3,500.00',
     });
   });
+
+  it('builds receipt-specific values and fixed labels', () => {
+    const form = requiredReceiptForm({
+      paymentDate: '2026-10-26',
+      paymentMode: 'Bank Transfer',
+      paymentReference: 'UTR12345',
+    });
+    const calculation = calculateInvoice(form);
+    const data = buildDocxData(form, calculation);
+
+    expect(data.documentNumber).toBe('SNT-RCT-2026-101');
+    expect(data.totalLabel).toBe(DOCUMENT_TYPES.receipt.labels.total);
+    expect(data.advanceLabel).toBe(DOCUMENT_TYPES.receipt.labels.advance);
+    expect(data.balanceLabel).toBe(DOCUMENT_TYPES.receipt.labels.balance);
+    expect(data.total).toBe('₹20,000.00');
+    expect(data.advance).toBe('₹5,000.00');
+    expect(data.balance).toBe('₹15,000.00');
+    expect(data.invoiceNumber).toBe('SNT-INV-2026-101');
+    expect(data.receiptAmount).toBe('5,000.00');
+    expect(data.paymentDate).toBe('26/10/2026');
+    expect(data.paymentMode).toBe('Bank Transfer');
+    expect(data.paymentReference).toBe('UTR12345');
+    expect(data.items).toEqual([]);
+  });
 });
 
 function formatDate(iso: string): string {
@@ -270,9 +407,12 @@ describe('makeInvoiceFilename', () => {
     );
   });
 
-  it('uses the invoice prefix for standard invoices', () => {
+  it('uses the invoice and receipt prefixes', () => {
     expect(makeInvoiceFilename('invoice', 'SNT-INV-2026-101')).toBe(
       'Invoice_SNT-INV-2026-101.docx',
+    );
+    expect(makeInvoiceFilename('receipt', 'SNT-RCT-2026-101')).toBe(
+      'Receipt_SNT-RCT-2026-101.docx',
     );
   });
 

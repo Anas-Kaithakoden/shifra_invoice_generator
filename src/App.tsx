@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { EditorPanel } from './components/EditorPanel';
 import { InvoiceDocument, ScaledInvoice } from './components/InvoiceDocument';
+import { ReceiptDocument } from './components/ReceiptDocument';
 import {
   AlertIcon,
   CheckIcon,
@@ -149,14 +150,22 @@ export default function App() {
     setForm((current) => createInitialForm(current.documentType));
     setShowValidation(false);
     setLastAddedId(null);
-    setStatus({ type: 'info', message: 'Form reset. Sample line items restored.' });
+    setStatus({
+      type: 'info',
+      message:
+        form.documentType === 'receipt'
+          ? 'Receipt form reset.'
+          : 'Form reset. Sample line items restored.',
+    });
   }
 
   function requestReset() {
+    const receipt = form.documentType === 'receipt';
     setPendingConfirm({
-      title: 'Reset the invoice form?',
-      message:
-        'This clears all client, invoice and payment details and restores the sample line items. It cannot be undone.',
+      title: receipt ? 'Reset the receipt form?' : 'Reset the invoice form?',
+      message: receipt
+        ? 'This clears all client, receipt and payment details. It cannot be undone.'
+        : 'This clears all client, invoice and payment details and restores the sample line items. It cannot be undone.',
       confirmLabel: 'Reset form',
       destructive: true,
       action: resetForm,
@@ -261,10 +270,10 @@ export default function App() {
                   Shifra Nuha Technologies
                 </p>
                 <h1 className="text-xl font-bold leading-tight text-ink sm:text-2xl">
-                  Invoice Generator
+                  Invoice &amp; Receipt Generator
                 </h1>
                 <p className="mt-0.5 text-[11px] text-muted">
-                  Proforma invoices and invoices from the original Word templates.
+                  Proforma invoices, invoices and receipts from the original Word templates.
                 </p>
               </div>
             </div>
@@ -320,7 +329,7 @@ export default function App() {
               aria-pressed={mobileView === 'editor'}
             >
               <PencilIcon />
-              Edit invoice
+              Edit details
             </button>
             <button
               type="button"
@@ -395,7 +404,11 @@ export default function App() {
                 </div>
                 <div className="min-h-0 flex-1 overflow-auto">
                   <ScaledInvoice key={mobileView}>
-                    <InvoiceDocument form={form} calculation={calculation} />
+                    {form.documentType === 'receipt' ? (
+                      <ReceiptDocument form={form} calculation={calculation} />
+                    ) : (
+                      <InvoiceDocument form={form} calculation={calculation} />
+                    )}
                   </ScaledInvoice>
                 </div>
               </div>
@@ -410,7 +423,7 @@ export default function App() {
 
           <footer className="mt-6 border-t border-line pt-4 text-[11px] leading-relaxed text-slate-500">
             <p>
-              Invoice data is processed in your browser and is never sent to a third-party
+              Document data is processed in your browser and is never sent to a third-party
               service. No accounts, analytics or permanent storage are used.
             </p>
             <p className="mt-1">
@@ -421,7 +434,11 @@ export default function App() {
       </div>
 
       <div className="print-root" aria-hidden="true">
-        <InvoiceDocument form={form} calculation={calculation} />
+        {form.documentType === 'receipt' ? (
+          <ReceiptDocument form={form} calculation={calculation} />
+        ) : (
+          <InvoiceDocument form={form} calculation={calculation} />
+        )}
       </div>
 
       {pendingConfirm ? (

@@ -14,6 +14,17 @@ export const DOCUMENT_TYPES = {
     filenamePrefix: 'Proforma_Invoice',
     footer: 'This is a proforma invoice, not a tax invoice or proof of payment.',
     templatePath: 'templates/shifra-proforma-template.docx',
+    clientSectionTitle: 'Bill to',
+    clientSectionDescription:
+      'Phone and email are optional. The address can span multiple lines.',
+    serviceFieldLabel: 'Service Name / Invoice Title',
+    serviceFieldPlaceholder: 'e.g. Private Limited Company Registration',
+    serviceErrorLabel: 'Service / invoice title',
+    detailsTitle: 'Service and document reference',
+    detailsDescription:
+      "The service title appears in the template's SERVICE area. The number and date appear in the header; the date is printed as DD/MM/YYYY.",
+    dateLabel: 'Invoice Date',
+    dateErrorLabel: 'Invoice date',
     labels: {
       total: 'Estimated Total',
       advance: 'Amount Payable in Advance',
@@ -42,6 +53,17 @@ export const DOCUMENT_TYPES = {
     filenamePrefix: 'Invoice',
     footer: 'Please quote the invoice number when making payment.',
     templatePath: 'templates/shifra-invoice-template.docx',
+    clientSectionTitle: 'Bill to',
+    clientSectionDescription:
+      'Phone and email are optional. The address can span multiple lines.',
+    serviceFieldLabel: 'Service Name / Invoice Title',
+    serviceFieldPlaceholder: 'e.g. Private Limited Company Registration',
+    serviceErrorLabel: 'Service / invoice title',
+    detailsTitle: 'Service and document reference',
+    detailsDescription:
+      "The service title appears in the template's SERVICE area. The number and date appear in the header; the date is printed as DD/MM/YYYY.",
+    dateLabel: 'Invoice Date',
+    dateErrorLabel: 'Invoice date',
     labels: {
       total: 'Total Amount',
       advance: 'Amount Received',
@@ -57,6 +79,45 @@ export const DOCUMENT_TYPES = {
       'The amount received is higher than the total, so the balance is negative. Review the payment figures before sending the invoice.',
     totalInvalidMessage:
       'The total cannot be calculated until every included line amount is valid.',
+    advanceLabelField: 'Received label',
+  },
+  receipt: {
+    label: 'Receipt',
+    shortLabel: 'Receipt',
+    previewTitle: 'RECEIPT',
+    numberLabel: 'Receipt No:',
+    formNumberLabel: 'Receipt Number',
+    numberPlaceholder: 'e.g. SNT-RCT-2026-101',
+    numberErrorLabel: 'Receipt number',
+    filenamePrefix: 'Receipt',
+    footer:
+      'This receipt acknowledges payment received. Please retain it for your records.',
+    templatePath: 'templates/shifra-receipt-template.docx',
+    clientSectionTitle: 'Received from',
+    clientSectionDescription:
+      'Enter the person or business that made the payment. Phone and email are optional.',
+    serviceFieldLabel: 'Payment For / Description',
+    serviceFieldPlaceholder: 'e.g. Payment against invoice SNT-INV-2026-101',
+    serviceErrorLabel: 'Payment description',
+    detailsTitle: 'Payment reference',
+    detailsDescription:
+      "The payment description appears in the template's PAYMENT FOR area. The receipt number and date appear in the header; the date is printed as DD/MM/YYYY.",
+    dateLabel: 'Receipt Date',
+    dateErrorLabel: 'Receipt date',
+    labels: {
+      total: 'Invoice Total',
+      advance: 'Amount Received',
+      balance: 'Balance Due',
+    },
+    summaryTitle: 'Payment received and invoice balance',
+    summaryDescription:
+      'Enter the amount received and the invoice total. The balance due is calculated as invoice total minus amount received.',
+    totalOverrideLabel: 'Override the invoice total manually',
+    manualTotalLabel: 'Manual invoice total',
+    advanceHint: 'Enter the amount paid by the client.',
+    advanceExceedsMessage:
+      'The amount received is higher than the invoice total, so the balance is negative. Review the payment figures before issuing the receipt.',
+    totalInvalidMessage: 'Enter a valid invoice total to calculate the balance.',
     advanceLabelField: 'Received label',
   },
 } as const;
@@ -80,6 +141,11 @@ export type InvoiceForm = {
   serviceName: string;
   documentNumber: string;
   invoiceDate: string;
+  invoiceNumber: string;
+  invoiceTotal: string;
+  paymentDate: string;
+  paymentMode: string;
+  paymentReference: string;
   items: LineItem[];
   advance: string;
   overrideTotal: boolean;
@@ -131,6 +197,11 @@ export type InvoiceDocxData = {
   total: string;
   advance: string;
   balance: string;
+  invoiceNumber: string;
+  receiptAmount: string;
+  paymentDate: string;
+  paymentMode: string;
+  paymentReference: string;
   items: Array<{ description: string; qty: string; amount: string }>;
 };
 
@@ -180,6 +251,11 @@ export function createInitialForm(documentType: DocumentType = 'proforma'): Invo
     serviceName: '',
     documentNumber: '',
     invoiceDate: todayISO(),
+    invoiceNumber: '',
+    invoiceTotal: '',
+    paymentDate: todayISO(),
+    paymentMode: '',
+    paymentReference: '',
     items: makeSampleItems(),
     advance: '',
     overrideTotal: false,
@@ -245,6 +321,35 @@ export function calculateLineItems(items: LineItem[]): ItemCalculation[] {
 
 export function calculateInvoice(form: InvoiceForm): InvoiceCalculation {
   const items = calculateLineItems(form.items);
+
+  if (form.documentType === 'receipt') {
+    const invoiceTotalResult = parseMoneyInput(form.invoiceTotal, { allowEmpty: false });
+    const advanceResult = parseMoneyInput(form.advance, { allowEmpty: false });
+    const totalPaise = invoiceTotalResult.ok ? invoiceTotalResult.paise : null;
+    const advancePaise = advanceResult.ok ? advanceResult.paise : null;
+    const balancePaise =
+      totalPaise !== null && advancePaise !== null
+        ? totalPaise - advancePaise
+        : null;
+
+    return {
+      items,
+      includedItems: [],
+      totalPaise,
+      effectiveTotalPaise: totalPaise,
+      advancePaise,
+      balancePaise,
+      totalOverrideActive: false,
+      advanceExceedsTotal:
+        totalPaise !== null &&
+        advancePaise !== null &&
+        advancePaise > totalPaise,
+      itemErrorCount: 0,
+      hasErrors: !invoiceTotalResult.ok || !advanceResult.ok,
+      outputItems: [],
+    };
+  }
+
   const includedItems = items.filter((entry) => !entry.isEmpty);
   const itemErrorCount = includedItems.filter(
     (entry) => entry.descriptionError || entry.qtyError || entry.amountError,
@@ -326,8 +431,8 @@ const optionalEmail = z
 
 function makeStaticSchema(documentType: DocumentType) {
   const config = DOCUMENT_TYPES[documentType];
-  return z.object({
-    documentType: z.enum(['proforma', 'invoice']),
+  const commonFields = {
+    documentType: z.enum(['proforma', 'invoice', 'receipt']),
     clientName: z
       .string()
       .trim()
@@ -343,8 +448,8 @@ function makeStaticSchema(documentType: DocumentType) {
     serviceName: z
       .string()
       .trim()
-      .min(1, 'Service / invoice title is required.')
-      .max(200, 'Service / invoice title is too long.'),
+      .min(1, `${config.serviceErrorLabel} is required.`)
+      .max(200, `${config.serviceErrorLabel} is too long.`),
     documentNumber: z
       .string()
       .trim()
@@ -356,8 +461,47 @@ function makeStaticSchema(documentType: DocumentType) {
       ),
     invoiceDate: z
       .string()
-      .min(1, 'Invoice date is required.')
-      .refine(isValidISODate, 'Enter a valid invoice date.'),
+      .min(1, `${config.dateErrorLabel} is required.`)
+      .refine(isValidISODate, `Enter a valid ${config.dateErrorLabel.toLowerCase()}.`),
+  };
+
+  if (documentType === 'receipt') {
+    return z.object({
+      ...commonFields,
+      invoiceNumber: z
+        .string()
+        .trim()
+        .min(1, 'Invoice number is required.')
+        .max(80, 'Invoice number is too long.')
+        .refine(
+          (value) => !/[\r\n\t]/.test(value),
+          'Invoice number cannot contain line breaks.',
+        ),
+      paymentDate: z
+        .string()
+        .min(1, 'Payment date is required.')
+        .refine(isValidISODate, 'Enter a valid payment date.'),
+      paymentMode: z
+        .string()
+        .trim()
+        .max(40, 'Payment mode is too long.')
+        .refine(
+          (value) => !/[\r\n\t]/.test(value),
+          'Payment mode cannot contain line breaks.',
+        ),
+      paymentReference: z
+        .string()
+        .trim()
+        .max(80, 'Reference number is too long.')
+        .refine(
+          (value) => !/[\r\n\t]/.test(value),
+          'Reference number cannot contain line breaks.',
+        ),
+    });
+  }
+
+  return z.object({
+    ...commonFields,
     totalLabel: z
       .string()
       .trim()
@@ -394,28 +538,38 @@ export function validateInvoice(form: InvoiceForm): ValidationResult {
     }
   }
 
-  const calculation = calculateLineItems(form.items);
-  for (const entry of calculation) {
-    if (entry.isEmpty) continue;
-    const rowErrors: ItemErrors = {};
-    if (entry.descriptionError) rowErrors.description = entry.descriptionError;
-    if (entry.qtyError) rowErrors.qty = entry.qtyError;
-    if (entry.amountError) rowErrors.amount = entry.amountError;
-    if (Object.keys(rowErrors).length > 0) {
-      itemErrors[entry.item.id] = rowErrors;
+  if (form.documentType !== 'receipt') {
+    const calculation = calculateLineItems(form.items);
+    for (const entry of calculation) {
+      if (entry.isEmpty) continue;
+      const rowErrors: ItemErrors = {};
+      if (entry.descriptionError) rowErrors.description = entry.descriptionError;
+      if (entry.qtyError) rowErrors.qty = entry.qtyError;
+      if (entry.amountError) rowErrors.amount = entry.amountError;
+      if (Object.keys(rowErrors).length > 0) {
+        itemErrors[entry.item.id] = rowErrors;
+      }
+    }
+
+    if (Object.keys(itemErrors).length > 0) {
+      errors.items = 'Fix the highlighted line items before generating the document.';
     }
   }
 
-  if (Object.keys(itemErrors).length > 0) {
-    errors.items = 'Fix the highlighted line items before generating the document.';
-  }
+  if (form.documentType === 'receipt') {
+    const advance = parseMoneyInput(form.advance, { allowEmpty: false });
+    if (!advance.ok) errors.advance = advance.error;
 
-  const advance = parseMoneyInput(form.advance);
-  if (!advance.ok) errors.advance = advance.error;
+    const invoiceTotal = parseMoneyInput(form.invoiceTotal, { allowEmpty: false });
+    if (!invoiceTotal.ok) errors.invoiceTotal = invoiceTotal.error;
+  } else {
+    const advance = parseMoneyInput(form.advance);
+    if (!advance.ok) errors.advance = advance.error;
 
-  if (form.overrideTotal) {
-    const override = parseMoneyInput(form.totalOverride, { allowEmpty: false });
-    if (!override.ok) errors.totalOverride = override.error;
+    if (form.overrideTotal) {
+      const override = parseMoneyInput(form.totalOverride, { allowEmpty: false });
+      if (!override.ok) errors.totalOverride = override.error;
+    }
   }
 
   return {
@@ -432,6 +586,8 @@ export function buildDocxData(
   const contact = [form.clientPhone.trim(), form.clientEmail.trim()]
     .filter(Boolean)
     .join('  |  ');
+  const config = DOCUMENT_TYPES[form.documentType];
+  const receipt = form.documentType === 'receipt';
 
   return {
     clientName: form.clientName.trim(),
@@ -440,12 +596,17 @@ export function buildDocxData(
     serviceName: form.serviceName.trim(),
     documentNumber: form.documentNumber.trim(),
     invoiceDate: formatDateDDMMYYYY(form.invoiceDate),
-    totalLabel: form.totalLabel.trim(),
-    advanceLabel: form.advanceLabel.trim(),
-    balanceLabel: form.balanceLabel.trim(),
+    totalLabel: receipt ? config.labels.total : form.totalLabel.trim(),
+    advanceLabel: receipt ? config.labels.advance : form.advanceLabel.trim(),
+    balanceLabel: receipt ? config.labels.balance : form.balanceLabel.trim(),
     total: formatINR(calculation.effectiveTotalPaise ?? 0),
     advance: formatINR(calculation.advancePaise ?? 0),
     balance: formatINR(calculation.balancePaise ?? 0),
+    invoiceNumber: form.invoiceNumber.trim(),
+    receiptAmount: formatINRWithoutSymbol(calculation.advancePaise ?? 0),
+    paymentDate: formatDateDDMMYYYY(form.paymentDate),
+    paymentMode: form.paymentMode.trim(),
+    paymentReference: form.paymentReference.trim(),
     items: calculation.outputItems,
   };
 }

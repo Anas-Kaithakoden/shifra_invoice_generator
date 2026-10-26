@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Build the dynamic Word templates used by the invoice generator.
+"""Build the dynamic Word templates used by the billing document generator.
 
-The original Shifra Nuha proforma invoice and invoice are kept untouched in
-templates/source/. This script makes tagged copies, replaces only the sample
-values with docxtemplater tags, removes the sample item rows (the first row
-becomes the repeating row), and keeps every other piece of Word formatting
-intact. Run with: npm run template
+The original Shifra Nuha proforma invoice, invoice and receipt are kept
+untouched in templates/source/. This script makes tagged copies, replaces only
+the sample values with docxtemplater tags, removes the sample item rows (the
+first row becomes the repeating row), and keeps every other piece of Word
+formatting intact. Run with: npm run template
 """
 
 from __future__ import annotations
@@ -53,6 +53,9 @@ TEMPLATES = (
         sample_balance="[BALANCE]",
     ),
 )
+
+RECEIPT_SOURCE = SOURCE_DIR / "Shifra_Nuha_Receipt_Template.docx"
+RECEIPT_OUTPUT = OUTPUT_DIR / "shifra-receipt-template.docx"
 
 
 def replace_once(text: str, old: str, new: str, label: str) -> str:
@@ -125,6 +128,14 @@ def set_cell_text(row: str, cell_index: int, text: str, keep_run_props: bool = T
     return row[: cell_match.start()] + new_cell + row[cell_match.end() :]
 
 
+def add_cant_split(row: str) -> str:
+    if "<w:cantSplit/>" in row:
+        return row
+    if "<w:trPr>" in row:
+        return row.replace("<w:trPr>", "<w:trPr><w:cantSplit/>", 1)
+    return row.replace("<w:tr>", "<w:tr><w:trPr><w:cantSplit/></w:trPr>", 1)
+
+
 def add_keep_next(block: str) -> str:
     return block.replace("<w:pPr>", "<w:pPr><w:keepNext/>")
 
@@ -177,16 +188,8 @@ def wrap_summary_and_bank(block: str) -> str:
     )
 
 
-def build_template(config: TemplateConfig) -> None:
-    if not config.source.exists():
-        raise FileNotFoundError(f"Original Word template not found: {config.source}")
-
-    with zipfile.ZipFile(config.source) as source_zip:
-        parts = {name: source_zip.read(name) for name in source_zip.namelist()}
-
-    document = parts["word/document.xml"].decode("utf-8")
-
-    # ---- Header / client / service fields ---------------------------------
+def tag_common_header(document: str, number_prefix: str, service_marker: str) -> str:
+    """Replace the shared client, service, number and date fields."""
     document = replace_once(
         document,
         '<w:t>[Client / Business Name]</w:t>',
@@ -205,12 +208,12 @@ def build_template(config: TemplateConfig) -> None:
         '<w:t xml:space="preserve">{clientContact}</w:t>',
         "client contact",
     )
-    document = replace_paragraph_after(document, "<w:t>SERVICE</w:t>", "{serviceName}")
+    document = replace_paragraph_after(document, service_marker, "{serviceName}")
 
     # ---- Document number: three runs become one tagged run ---------------
     old_number = (
         '<w:r><w:rPr><w:b/><w:bCs/><w:sz w:val="17"/><w:szCs w:val="17"/></w:rPr>'
-        f"<w:t>{config.number_prefix}</w:t></w:r>"
+        f"<w:t>{number_prefix}</w:t></w:r>"
         '<w:r w:rsidR="00E36E5B"><w:rPr><w:b/><w:bCs/><w:sz w:val="17"/><w:szCs w:val="17"/></w:rPr>'
         "<w:t>2026-</w:t></w:r>"
         '<w:r w:rsidR="00FD0A78"><w:rPr><w:b/><w:bCs/><w:sz w:val="17"/><w:szCs w:val="17"/></w:rPr>'
@@ -249,7 +252,20 @@ def build_template(config: TemplateConfig) -> None:
     if old_date_runs not in date_paragraph:
         raise RuntimeError("Date placeholder runs not found")
     date_paragraph = date_paragraph.replace(old_date_runs, new_date_run, 1)
-    document = document[:date_start] + date_paragraph + document[date_end:]
+    return document[:date_start] + date_paragraph + document[date_end:]
+
+
+def build_template(config: TemplateConfig) -> None:
+    if not config.source.exists():
+        raise FileNotFoundError(f"Original Word template not found: {config.source}")
+
+    with zipfile.ZipFile(config.source) as source_zip:
+        parts = {name: source_zip.read(name) for name in source_zip.namelist()}
+
+    document = parts["word/document.xml"].decode("utf-8")
+
+    # ---- Header / client / service fields ---------------------------------
+    document = tag_common_header(document, config.number_prefix, "<w:t>SERVICE</w:t>")
 
     # ---- Items table: turn the first sample row into the repeating row --
     table_start, table_end = table_span(document, "<w:t>DESCRIPTION</w:t>")
@@ -355,9 +371,114 @@ def build_template(config: TemplateConfig) -> None:
     print(f"Built {config.key} template: {config.output}")
 
 
+def build_receipt_template() -> None:
+    if not RECEIPT_SOURCE.exists():
+        raise FileNotFoundError(f"Original Word template not found: {RECEIPT_SOURCE}")
+
+    with zipfile.ZipFile(RECEIPT_SOURCE) as source_zip:
+        parts = {name: source_zip.read(name) for name in source_zip.namelist()}
+
+    document = parts["word/document.xml"].decode("utf-8")
+
+    # ---- Header / received-from / payment-for fields ----------------------
+    document = tag_common_header(document, "SNT-RCT-", "<w:t>PAYMENT FOR</w:t>")
+
+    # ---- Fixed one-row payment table -------------------------------------
+    table_start, table_end = table_span(document, "<w:t>DESCRIPTION</w:t>")
+    table = document[table_start:table_end]
+    rows = list(re.finditer(r"<w:tr\b.*?</w:tr>", table, re.S))
+    if len(rows) < 2:
+        raise RuntimeError("Receipt items table has no data row")
+    header_row = rows[0].group(0)
+    item_row = set_cell_text(
+        rows[1].group(0),
+        0,
+        "Payment received against Invoice No. {invoiceNumber}",
+    )
+    item_row = set_cell_text(item_row, 1, "1")
+    item_row = set_cell_text(item_row, 2, "{receiptAmount}")
+    item_row = add_cant_split(item_row)
+    new_table = table[: rows[0].start()] + header_row + item_row + "</w:tbl>"
+    document = document[:table_start] + new_table + document[table_end:]
+
+    # ---- Summary: Amount Received, Invoice Total, Balance Due ------------
+    summary_start, summary_end = table_span(document, "<w:t>Amount Received</w:t>")
+    summary = document[summary_start:summary_end]
+    summary_rows = list(re.finditer(r"<w:tr\b.*?</w:tr>", summary, re.S))
+    if len(summary_rows) != 3:
+        raise RuntimeError("Receipt summary table must have three rows")
+    values = ("{advance}", "{total}", "{balance}")
+    for row_match, value in reversed(list(zip(summary_rows, values))):
+        new_row = set_cell_text(row_match.group(0), 1, value)
+        summary = summary[: row_match.start()] + new_row + summary[row_match.end() :]
+    summary = add_keep_next(summary)
+    document = document[:summary_start] + summary + document[summary_end:]
+
+    # ---- Payment details table -------------------------------------------
+    details_start, details_end = table_span(document, "<w:t>PAYMENT MODE</w:t>")
+    details = document[details_start:details_end]
+    details_rows = list(re.finditer(r"<w:tr\b.*?</w:tr>", details, re.S))
+    if len(details_rows) != 5:
+        raise RuntimeError("Receipt payment details table must have five rows")
+    detail_values = (
+        "{paymentMode}",
+        "{paymentReference}",
+        "{invoiceNumber}",
+        "{paymentDate}",
+    )
+    for row_match, value in reversed(list(zip(details_rows, detail_values))):
+        new_row = set_cell_text(row_match.group(0), 1, value)
+        details = details[: row_match.start()] + new_row + details[row_match.end() :]
+    details = add_keep_next(details)
+    document = document[:details_start] + details + document[details_end:]
+
+    # Keep the summary and payment details on the same page. This mirrors the
+    # invoice's summary-and-bank block without changing either nested table.
+    summary_start, summary_end = table_span(document, "<w:t>Amount Received</w:t>")
+    details_start, details_end = table_span(document, "<w:t>PAYMENT MODE</w:t>")
+    if details_start < summary_end:
+        raise RuntimeError("Receipt payment details must follow the summary")
+    summary_and_details = wrap_summary_and_bank(document[summary_start:details_end])
+    document = document[:summary_start] + summary_and_details + document[details_end:]
+
+    leftovers = (
+        "[Client / Business Name]",
+        "[Client Address]",
+        "[Client Phone / Email]",
+        "[Service / Description of Payment]",
+        "[SNT-INV-YYYY-XXX]",
+        "[AMOUNT]",
+        "[1]",
+        "[PAID]",
+        "[TOTAL]",
+        "[BALANCE]",
+        "[Cash / UPI / Bank Transfer]",
+        "[Reference Number]",
+        "[DD/MM/YYYY]",
+    )
+    for token in leftovers:
+        if token in document:
+            raise RuntimeError(f"Receipt sample value was not replaced: {token}")
+
+    # ---- Write the new docx, preserving every other package part --------
+    parts["word/document.xml"] = document.encode("utf-8")
+    RECEIPT_OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+    temp_output = RECEIPT_OUTPUT.with_suffix(".tmp.docx")
+    with zipfile.ZipFile(temp_output, "w", zipfile.ZIP_DEFLATED) as out_zip:
+        for name, data in parts.items():
+            out_zip.writestr(name, data)
+    shutil.move(temp_output, RECEIPT_OUTPUT)
+
+    logo_output = ROOT / "public" / "shifra-logo.png"
+    logo_output.write_bytes(parts["word/media/image1.png"])
+
+    print(f"Built receipt template: {RECEIPT_OUTPUT}")
+
+
 def build() -> None:
     for config in TEMPLATES:
         build_template(config)
+    build_receipt_template()
     print(f"Extracted logo: {ROOT / 'public' / 'shifra-logo.png'}")
 
 
